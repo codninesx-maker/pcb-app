@@ -2,6 +2,7 @@ import 'package:doctor_profile/dashboard/post/comments_bottom_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class Likecommentshare extends StatefulWidget {
   final Map<String, dynamic> post;
@@ -251,15 +252,6 @@ class _LikecommentshareState extends State<Likecommentshare> with AutomaticKeepA
                               subtitle: const Text("View this post immediately"),
                               onTap: () {
                                 Navigator.pop(context);
-                                // Replace with your actual Post Detail page navigation:
-                                /*
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => PostDetailScreen(postId: post['id']),
-                  ),
-                );
-                */
                               },
                             ),
 
@@ -269,14 +261,33 @@ class _LikecommentshareState extends State<Likecommentshare> with AutomaticKeepA
                                 backgroundColor: Colors.grey,
                                 child: Icon(Icons.link, color: Colors.white, size: 20),
                               ),
-                              title: const Text("Copy Link"),
-                              subtitle: const Text("Copy link to clipboard"),
-                              onTap: () {
+                              title: const Text("Copy Link & Open"),
+                              subtitle: const Text("Copy link and view instantly"),
+                              onTap: () async {
                                 Navigator.pop(context);
-                                Clipboard.setData(ClipboardData(text: postLink));
+
+                                // 1. Define the exact link
+                                final String postLink = "https://codninesx-maker.github.io/ad/1ae60096-726e-450f-9791-b7e647d90358";
+
+                                // 2. Copy to clipboard with your custom format message
+                                final String shareContent = "Check this out on Lokko Market. Click to view the post instantly:\n$postLink";
+                                Clipboard.setData(ClipboardData(text: shareContent));
+
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text("Link copied to clipboard!")),
+                                  const SnackBar(content: Text("Link copied & opening...")),
                                 );
+
+                                // 3. Instantly open the link in the browser
+                                final Uri uri = Uri.parse(postLink);
+                                try {
+                                  if (await canLaunchUrl(uri)) {
+                                    await launchUrl(uri, mode: LaunchMode.externalApplication);
+                                  } else {
+                                    debugPrint("Could not launch $postLink");
+                                  }
+                                } catch (e) {
+                                  debugPrint("Error launching URL: $e");
+                                }
                               },
                             ),
 
