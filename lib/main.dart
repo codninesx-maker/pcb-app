@@ -6,8 +6,10 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 2. Initialize AdMob SDK
-  await MobileAds.instance.initialize();
+  // Initialize AdMob SDK ONLY on mobile platforms (it crashes on Web)
+  if (!kIsWeb) {
+    await MobileAds.instance.initialize();
+  }
 
   await Supabase.initialize(
     url: 'https://jqmlivtchooqbrwlsdzo.supabase.co',
