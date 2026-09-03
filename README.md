@@ -1,4 +1,4 @@
-# doctor_profile
+# pharmacist_profile
 
 A new Flutter project.
 
