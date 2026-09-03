@@ -6,7 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize AdMob SDK ONLY on mobile platforms (it crashes on Web)
+  // Initialize AdMob SDK safely
   if (!kIsWeb) {
     await MobileAds.instance.initialize();
   }
