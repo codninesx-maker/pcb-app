@@ -2,17 +2,13 @@
 <html>
 <head>
   <!--
-    If you are serving your web app in a path other than the root, change the
-    href value below to reflect the base path you are serving from.
+    If you are serving your web app in a path subdirectory rather than the root,
+    change the base href value below to reflect the path of your sub-directory.
 
-    The path provided below has to start and end with a slash "/" in order for
-    it to work correctly.
+    E.g., if your website is hosted at https://example.com/mypapp, change it to:
+    <base href="/mypapp/">
 
-    For more details:
-    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
-
-    This is a placeholder for base href that will be replaced by the value of
-    the `--base-href` argument provided to `flutter build`.
+    This is required for relative asset links to resolve correctly.
   -->
   <base href="/pcb-app/">
 
@@ -21,15 +17,15 @@
   <meta name="description" content="A new Flutter project.">
 
   <!-- iOS meta tags & icons -->
-  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="doctor_profile">
+  <meta name="apple-mobile-web-app-title" content="pharmacist_profile">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
-  <title>doctor_profile</title>
+  <title>pharmacist_profile</title>
   <link rel="manifest" href="manifest.json">
 </head>
 <body>
