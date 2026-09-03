@@ -8,15 +8,20 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      
-      - uses: subosito/flutter-action@v2
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
           cache: true
 
-      - run: flutter pub get
-      - run: flutter build web --release --base-href="/pcb-app/"
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build web app
+        run: flutter build web --release --base-href="/pcb-app/"
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
