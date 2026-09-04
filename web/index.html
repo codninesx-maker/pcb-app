@@ -20,6 +20,7 @@
   <link rel="manifest" href="manifest.json">
 
   <!-- Smart Deep Link & Play Store Redirection Script for Mobile -->
+  <!-- Smart Deep Link & Play Store Redirection Script for Mobile -->
   <script>
     window.addEventListener('DOMContentLoaded', (event) => {
       const hash = window.location.hash;
@@ -28,14 +29,19 @@
       if (hash.includes('/post/') && /Android/i.test(navigator.userAgent)) {
         const postId = hash.split('/post/')[1];
 
-        // Android Intent to open the installed app
-        const appSchemeUrl = `intent://codninesx-maker.github.io/pcb-app/#/post/${postId}#Intent;scheme=https;package=com.codninesx-maker.pcbapp;end;`;
-        const playStoreUrl = 'https://play.google.com/store/apps/details?id=com.codninesx-maker.pcbapp';
+        // Use your correct Android package ID here
+        const packageName = 'com.rxai.pcb'; // Update if your package ID is different
+
+        // Valid Android Intent structure
+        const appSchemeUrl = `intent://codninesx-maker.github.io/pcb-app/#/post/${postId}#Intent;scheme=https;package=${packageName};end;`;
+
+        // Correct, working Google Play Store web link format
+        const playStoreUrl = `https://play.google.com/store/apps/details?id=${packageName}`;
 
         // Try launching the app
         window.location.replace(appSchemeUrl);
 
-        // If app isn't installed, fallback to Play Store after a brief moment
+        // If app isn't installed, fallback to the correct Play Store URL after a brief moment
         setTimeout(function() {
           if (!document.hidden) {
             window.location.replace(playStoreUrl);
