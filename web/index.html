@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <base href="/pcb-app/">
+  <base href="$FLUTTER_BASE_HREF">
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
@@ -29,8 +29,8 @@
         const postId = hash.split('/post/')[1];
 
         // Android Intent to open the installed app
-        const appSchemeUrl = `intent://codninesx-maker.github.io/pcb-app/#/post/${postId}#Intent;scheme=https;package=com.codninesx.pcbapp;end;`;
-        const playStoreUrl = 'https://play.google.com/store/apps/details?id=com.codninesx.pcbapp';
+        const appSchemeUrl = `intent://codninesx-maker.github.io/pcb-app/#/post/${postId}#Intent;scheme=https;package=com.codninesx-maker.pcbapp;end;`;
+        const playStoreUrl = 'https://play.google.com/store/apps/details?id=com.codninesx-maker.pcbapp';
 
         // Try launching the app
         window.location.replace(appSchemeUrl);
