@@ -1,0 +1,2 @@
+String getWebWindowHash() => '';
+void clearWebWindowHash() {}
