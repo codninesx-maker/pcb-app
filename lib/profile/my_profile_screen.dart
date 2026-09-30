@@ -2,25 +2,25 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'profile-create_screen.dart'; // Or your profile detail view
 
-class MyProfileScreen extends StatefulWidget {
-  const MyProfileScreen({super.key});
+class MyprofileScreen extends StatefulWidget {
+  const MyprofileScreen({super.key});
 
   @override
-  State<MyProfileScreen> createState() => _MyProfileScreenState();
+  State<MyprofileScreen> createState() => _MyprofileScreenState();
 }
 
-class _MyProfileScreenState extends State<MyProfileScreen> {
+class _MyprofileScreenState extends State<MyprofileScreen> {
   bool _isLoading = true;
-  Map<String, dynamic>? _myProfile;
+  Map<String, dynamic>? _myprofile;
   final _supabase = Supabase.instance.client;
 
   @override
   void initState() {
     super.initState();
-    _fetchMyProfile();
+    _fetchMyprofile();
   }
 
-  Future<void> _fetchMyProfile() async {
+  Future<void> _fetchMyprofile() async {
     final user = _supabase.auth.currentUser;
     if (user == null) {
       setState(() => _isLoading = false);
@@ -37,7 +37,7 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
 
       if (mounted) {
         setState(() {
-          _myProfile = data;
+          _myprofile = data;
           _isLoading = false;
         });
       }
@@ -51,14 +51,14 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("My Profile"),
+        title: const Text("My profile"),
         backgroundColor: Colors.white,
         elevation: 0.5,
         iconTheme: const IconThemeData(color: Colors.black),
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : _myProfile == null
+          : _myprofile == null
           ? Center(
         child: Padding(
           padding: const EdgeInsets.all(24.0),
@@ -78,11 +78,11 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
                 onPressed: () async {
                   await Navigator.push(
                     context,
-                    MaterialPageRoute(builder: (context) => const ProfileCreateScreen()),
+                    MaterialPageRoute(builder: (context) => const profileCreateScreen()),
                   );
-                  _fetchMyProfile(); // Refresh after creation
+                  _fetchMyprofile(); // Refresh after creation
                 },
-                child: const Text("Create Profile", style: TextStyle(color: Colors.white)),
+                child: const Text("Create profile", style: TextStyle(color: Colors.white)),
               ),
             ],
           ),
@@ -95,21 +95,21 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
           children: [
             CircleAvatar(
               radius: 50,
-              backgroundImage: _myProfile!['image_url'] != null
-                  ? NetworkImage(_myProfile!['image_url'])
+              backgroundImage: _myprofile!['image_url'] != null
+                  ? NetworkImage(_myprofile!['image_url'])
                   : null,
-              child: _myProfile!['image_url'] == null
+              child: _myprofile!['image_url'] == null
                   ? const Icon(Icons.person, size: 50)
                   : null,
             ),
             const SizedBox(height: 16),
             Text(
-              _myProfile!['name'] ?? "No Name",
+              _myprofile!['name'] ?? "No Name",
               style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 6),
             Text(
-              _myProfile!['specialization'] ?? "No Specialization",
+              _myprofile!['specialization'] ?? "No Specialization",
               style: const TextStyle(fontSize: 16, color: Colors.blueAccent),
             ),
             const SizedBox(height: 20),
@@ -122,11 +122,11 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
               ),
               child: ListTile(
                 title: const Text("Email / Contact"),
-                subtitle: Text(_myProfile!['email'] ?? _supabase.auth.currentUser?.email ?? "N/A"),
+                subtitle: Text(_myprofile!['email'] ?? _supabase.auth.currentUser?.email ?? "N/A"),
                 leading: const Icon(Icons.email, color: Colors.blueAccent),
               ),
             ),
-            // Add more fields or an "Edit Profile" button here if desired
+            // Add more fields or an "Edit profile" button here if desired
           ],
         ),
       ),

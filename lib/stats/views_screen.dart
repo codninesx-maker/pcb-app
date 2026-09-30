@@ -1,5 +1,5 @@
-import 'package:doctor_profile/profile/view_profile_detail_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:pharmacist_profile/profile/view_profile_detail_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class ViewsScreen extends StatefulWidget {
@@ -19,10 +19,10 @@ class _ViewsScreenState extends State<ViewsScreen> {
   @override
   void initState() {
     super.initState();
-    _fetchProfileViews();
+    _fetchprofileViews();
   }
 
-  Future<void> _fetchProfileViews() async {
+  Future<void> _fetchprofileViews() async {
     try {
       setState(() => _isLoading = true);
 
@@ -140,7 +140,7 @@ class _ViewsScreenState extends State<ViewsScreen> {
           onPressed: () => Navigator.pop(context),
         ),
         title: const Text(
-          "Profile Viewers",
+          "profile Viewers",
           style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black),
         ),
         centerTitle: true,
@@ -162,7 +162,7 @@ class _ViewsScreenState extends State<ViewsScreen> {
         ),
       )
           : RefreshIndicator(
-        onRefresh: _fetchProfileViews,
+        onRefresh: _fetchprofileViews,
         child: ListView.builder(
           padding: const EdgeInsets.all(12),
           itemCount: _viewersList.length,
@@ -194,8 +194,8 @@ class _ViewsScreenState extends State<ViewsScreen> {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (context) => ProfileDetailScreen(
-                        doctor: viewer,
+                      builder: (context) => profileDetailScreen(
+                        profile: viewer,
                       ),
                     ),
                   );

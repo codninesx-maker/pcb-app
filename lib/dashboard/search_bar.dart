@@ -9,7 +9,7 @@ class CustomSearchBar extends StatelessWidget {
     super.key,
     required this.controller,
     required this.onChanged,
-    this.hintText = "Search by name or specialty...",
+    this.hintText = "Search by name, grade, company, or specialty...",
   });
 
   @override

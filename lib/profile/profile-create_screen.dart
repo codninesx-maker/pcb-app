@@ -1,21 +1,22 @@
 import 'dart:io';
-import 'package:doctor_profile/image/cloudinary_service.dart';
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:pharmacist_profile/admobs/ads_test_banner.dart';
+import 'package:pharmacist_profile/image/cloudinary_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../admobs/ads_test_banner.dart';
 
-class ProfileCreateScreen extends StatefulWidget {
-  const ProfileCreateScreen({super.key});
+
+class profileCreateScreen extends StatefulWidget {
+  final Map<String, dynamic>? userData;
+  const profileCreateScreen({super.key, this.userData});
 
   @override
-  State<ProfileCreateScreen> createState() => _ProfileCreateScreenState();
+  State<profileCreateScreen> createState() => _profileCreateScreenState();
 }
 
-class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
+class _profileCreateScreenState extends State<profileCreateScreen> {
   final _formKey = GlobalKey<FormState>();
-
   final _nameController = TextEditingController();
   final _specialtyController = TextEditingController();
   final _gradeController = TextEditingController();
@@ -25,7 +26,7 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
   final _emailController = TextEditingController();
   final _bmdcController = TextEditingController();
   final _nidController = TextEditingController();
-  final _bpcLicenseController = TextEditingController();
+  final _pcbLicenseController = TextEditingController();
   final TextEditingController _regNumController = TextEditingController();
 
   String _selectedStatus = "Available";
@@ -39,7 +40,7 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
   File? _coverFile; // Added cover image file state
   bool _isLoading = false;
   bool _isOtpSent = false;
-  bool _isVerifyingBpc = false;
+  bool _isVerifyingPcb = false;
 
   final _cloudinary = CloudinaryService();
   final _supabase = Supabase.instance.client;
@@ -93,7 +94,7 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
       return;
     }
 
-    _verifyBpcViaCloudFunction();
+    _verifyPcbViaCloudFunction();
   }
 
   Future<void> _sendOtp() async {
@@ -170,23 +171,47 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
         String? imageUrl;
         String? coverUrl;
 
+        // 1. Extract old URLs from widget.userData if editing an existing profile
+        final String? oldImageUrl = widget.userData?['image_url'];
+        final String? oldCoverUrl = widget.userData?['cover_url'];
+
+        // 2. Handle Profile Image Replacement / Deletion
         if (_imageFile != null) {
+          // If there was an old image, delete it from Cloudinary first
+          if (oldImageUrl != null && oldImageUrl.isNotEmpty) {
+            await _cloudinary.deleteMedia(oldImageUrl);
+          }
+          // Upload the new profile image
           imageUrl = await _cloudinary.uploadImage(_imageFile!);
-        }
-        if (_coverFile != null) {
-          coverUrl = await _cloudinary.uploadImage(_coverFile!);
+        } else {
+          // Keep the existing image URL if no new file was picked
+          imageUrl = oldImageUrl;
         }
 
-        await _supabase.from('pcb').insert({
+        // 3. Handle Cover Image Replacement / Deletion
+        if (_coverFile != null) {
+          // If there was an old cover image, delete it from Cloudinary first
+          if (oldCoverUrl != null && oldCoverUrl.isNotEmpty) {
+            await _cloudinary.deleteMedia(oldCoverUrl);
+          }
+          // Upload the new cover image
+          coverUrl = await _cloudinary.uploadImage(_coverFile!);
+        } else {
+          // Keep the existing cover URL if no new file was picked
+          coverUrl = oldCoverUrl;
+        }
+
+        // 4. Save/Upsert to Supabase
+        await _supabase.from('pcb').upsert({
           'id': res.session!.user.id,
           'name': _nameController.text.trim(),
-          'specialization': _selectedSpecialty, // <-- Use the dropdown state variable directly
-          'grade': _selectedGrade,               // <-- Use the grade state variable directly
+          'specialization': _selectedSpecialty,
+          'grade': _selectedGrade,
           'about_profile': _aboutController.text.trim(),
           'phone': _phoneController.text.trim(),
           'phone_visibility': _phoneVisibility,
           'job_location': _hospitalController.text.trim(),
-          'pcb_licence': _bpcLicenseController.text.trim(),
+          'pcb_licence': _pcbLicenseController.text.trim(),
           'email': _emailController.text.trim(),
           'company_name': _nidController.text.trim(),
           'status': _selectedStatus,
@@ -198,7 +223,7 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
           setState(() => _isLoading = false);
           Navigator.pop(context, true);
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Profile Created Successfully!")),
+            const SnackBar(content: Text("Profile Saved Successfully!")),
           );
         }
       }
@@ -251,7 +276,7 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
     }
   }
 
-  Future<void> _verifyBpcViaCloudFunction() async {
+  Future<void> _verifyPcbViaCloudFunction() async {
     final bool isStudent = _selectedSpecialty == "Student Pharmacy";
 
     // If the specialty is Student Pharmacy, skip verification completely
@@ -265,19 +290,19 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
       return;
     }
 
-    final String credentialLabel = "BPC Licence";
+    final String credentialLabel = "PCB Licence";
 
     if (_nameController.text.trim().isEmpty ||
         _gradeController.text.trim().isEmpty ||
-        _bpcLicenseController.text.trim().isEmpty) {
+        _pcbLicenseController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Please enter Name, Grade, and $credentialLabel")),
       );
       return;
     }
 
-    if (_isVerifyingBpc) return;
-    setState(() => _isVerifyingBpc = true);
+    if (_isVerifyingPcb) return;
+    setState(() => _isVerifyingPcb = true);
 
     try {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -285,15 +310,15 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
       );
 
       final response = await _supabase.functions.invoke(
-        'verify-bpc',
+        'verify-pcb',
         body: {
           'name': _nameController.text.trim(),
-          'pcb_licence': _bpcLicenseController.text.trim(),
+          'pcb_licence': _pcbLicenseController.text.trim(),
           'is_student': isStudent,
         },
       );
 
-      setState(() => _isVerifyingBpc = false);
+      setState(() => _isVerifyingPcb = false);
 
       if (response.status == 200) {
         final data = response.data;
@@ -322,7 +347,7 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
         throw Exception("Server returned status ${response.status}");
       }
     } catch (e) {
-      setState(() => _isVerifyingBpc = false);
+      setState(() => _isVerifyingPcb = false);
       debugPrint("Verification Error: $e");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -335,7 +360,7 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
   @override
   Widget build(BuildContext context) {
     final bool isStudent = _selectedSpecialty == "Student Pharmacy";
-    final String credentialLabel = isStudent ? "Student ID" : "BPC Licence #";
+    final String credentialLabel = isStudent ? "Student ID" : "PCB Licence #";
     final String universityLabel = isStudent ? "University Name" : "Company Name";
     final String deptLabel = isStudent ? "Dept Name" : "Job Title";
     final String batchLabel = isStudent ? "Batch" : "Company Location";
@@ -356,7 +381,7 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
           },
         ),
         title: Text(
-          _isOtpSent ? "Verify Email" : "Create Profile",
+          _isOtpSent ? "Verify Email" : "Create profile",
           style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black),
         ),
         centerTitle: true,
@@ -365,19 +390,19 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
         padding: const EdgeInsets.all(12),
         child: _isOtpSent
             ? _buildInlineOtpView()
-            : _buildCreateProfileForm(credentialLabel, universityLabel, deptLabel, batchLabel),
+            : _buildCreateprofileForm(credentialLabel, universityLabel, deptLabel, batchLabel),
       ),
     );
   }
 
-  // --- REGULAR CREATE PROFILE FORM VIEW ---
-  Widget _buildCreateProfileForm(
+  // --- REGULAR CREATE profile FORM VIEW ---
+  Widget _buildCreateprofileForm(
       String credentialLabel, String universityLabel, String deptLabel, String batchLabel) {
     return Form(
       key: _formKey,
       child: Column(
         children: [
-          // --- FACEBOOK-STYLE PROFILE & COVER HEADER ---
+          // --- FACEBOOK-STYLE profile & COVER HEADER ---
           Container(
             decoration: BoxDecoration(
               color: Colors.white,
@@ -512,7 +537,7 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
-                    child: _buildField(credentialLabel, _bpcLicenseController, icon: Icons.verified_outlined),
+                    child: _buildField(credentialLabel, _pcbLicenseController, icon: Icons.verified_outlined),
                   ),
                   const SizedBox(width: 8),
                   Padding(
@@ -526,7 +551,7 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                           padding: const EdgeInsets.symmetric(horizontal: 14),
                         ),
-                        onPressed: _verifyBpcViaCloudFunction,
+                        onPressed: _verifyPcbViaCloudFunction,
                         child: const Text("Verify", style: TextStyle(fontWeight: FontWeight.bold)),
                       ),
                     ),
@@ -615,9 +640,9 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
           ),
 
           const SizedBox(height: 10),
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 6),
-            child: DoctorTestBanner(adSize: AdSize.largeBanner),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: pharmacistTestBanner(adSize: AdSize.banner),
           ),
           const SizedBox(height: 10),
 
@@ -732,7 +757,7 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
               onPressed: _isLoading ? null : _verifyAndSave,
               child: _isLoading
                   ? const CircularProgressIndicator(color: Colors.white)
-                  : const Text("Verify & Create Profile", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  : const Text("Verify & Create profile", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             ),
           ),
           const SizedBox(height: 16),

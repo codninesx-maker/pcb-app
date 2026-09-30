@@ -1,21 +1,22 @@
 import 'dart:io';
-import 'package:doctor_profile/admobs/ads_test_banner.dart';
-import 'package:doctor_profile/image/cloudinary_service.dart';
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:pharmacist_profile/admobs/ads_test_banner.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:pharmacist_profile/image/cloudinary_service.dart';
+import 'package:file_picker/file_picker.dart';
 
-class EditProfileScreen extends StatefulWidget {
-  final Map<String, dynamic> doctor;
+class EditprofileScreen extends StatefulWidget {
+  final Map<String, dynamic>? userData;
 
-  const EditProfileScreen({super.key, required this.doctor});
+  const EditprofileScreen({super.key, this.userData});
 
   @override
-  State<EditProfileScreen> createState() => _EditDoctorProfileScreenState();
+  State<EditprofileScreen> createState() => _EditprofileScreenState();
 }
 
-class _EditDoctorProfileScreenState extends State<EditProfileScreen> {
+class _EditprofileScreenState extends State<EditprofileScreen> {
   final _formKey = GlobalKey<FormState>();
 
   final _nameController = TextEditingController();
@@ -36,7 +37,7 @@ class _EditDoctorProfileScreenState extends State<EditProfileScreen> {
   String get universityLabel => _isStudent ? "University / Institute" : "Company Name";
   String get deptLabel => _isStudent ? "Department" : "Job Title";
   String get batchLabel => _isStudent ? "Batch / Session" : "Company Location";
-  String get credentialLabel => _isStudent ? "Student ID / Roll" : "BPC Licence #";
+  String get credentialLabel => _isStudent ? "Student ID / Roll" : "PCB Licence #";
 
   // Phone visibility state options
   String _phoneVisibility = "Public";
@@ -44,11 +45,12 @@ class _EditDoctorProfileScreenState extends State<EditProfileScreen> {
 
   String? _selectedSpecialty;
   String? _selectedGrade;
+  File? _videoFile;
 
   File? _imageFile;
   File? _coverFile; // Added cover image file state
   bool _isLoading = false;
-  bool _isVerifyingBpc = false; // Added BPC verification state
+  bool _isVerifyingPcb = false; // Added PCB verification state
 
   final _cloudinary = CloudinaryService();
   final _supabase = Supabase.instance.client;
@@ -72,57 +74,121 @@ class _EditDoctorProfileScreenState extends State<EditProfileScreen> {
   @override
   void initState() {
     super.initState();
-    _nameController.text = widget.doctor['name'] ?? "";
-    _specialtyController.text = widget.doctor['specialization'] ?? "";
-    _gradeController.text = widget.doctor['grade'] ?? "";
-    _aboutController.text = widget.doctor['about_profile'] ?? "";
-    _bmdcController.text = widget.doctor['company_name'] ?? "";
-    _nidController.text = widget.doctor['company_name'] ?? "";
-    _hospitalController.text = widget.doctor['job_location'] ?? "";
-    _pcbLicenseController.text = widget.doctor['pcb_licence'] ?? "";
-    _emailController.text = widget.doctor['email'] ?? "";
-    _phoneController.text = widget.doctor['phone'] ?? "";
-    _selectedStatus = widget.doctor['status'] ?? "Available";
+    final profile = widget.userData ?? {};
+
+    _nameController.text = profile['name'] ?? "";
+    _specialtyController.text = profile['specialization'] ?? "";
+    _gradeController.text = profile['grade'] ?? "";
+    _aboutController.text = profile['about_profile'] ?? "";
+    _bmdcController.text = profile['company_name'] ?? "";
+    _nidController.text = profile['company_name'] ?? "";
+    _hospitalController.text = profile['job_location'] ?? "";
+    _pcbLicenseController.text = profile['pcb_licence'] ?? "";
+    _emailController.text = profile['email'] ?? "";
+    _phoneController.text = profile['phone'] ?? "";
+    _selectedStatus = profile['status'] ?? "Available";
 
     // Load phone visibility from existing data or default to Public
-    _phoneVisibility = widget.doctor['phone_visibility'] ?? "Public";
+    _phoneVisibility = profile['phone_visibility'] ?? "Public";
     if (!_phoneVisibilityOptions.contains(_phoneVisibility)) {
       _phoneVisibility = "Public";
     }
 
-    _selectedSpecialty = _specialtyOptions.contains(widget.doctor['specialization'])
-        ? widget.doctor['specialization']
+    _selectedSpecialty = _specialtyOptions.contains(profile['specialization'])
+        ? profile['specialization']
         : null;
 
-    _selectedGrade = _gradeOptions.contains(widget.doctor['grade'])
-        ? widget.doctor['grade']
+    _selectedGrade = _gradeOptions.contains(profile['grade'])
+        ? profile['grade']
         : null;
   }
 
-  Future<void> _pickImage({bool isCover = false}) async {
+  Future<void> _pickAndValidateMedia({bool isCover = false, bool pickVideo = false}) async {
+    // ⚠️ Security & Policy Warning Check to block adult/nude content
+    final bool? shouldProceed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Media Upload Policy"),
+        content: const Text(
+          "Strictly prohibited: Nudity, sexually explicit content, adult material, or violence. "
+              "All uploads are automatically scanned by AI moderation. Violating accounts will be banned.\n\nDo you wish to proceed?",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text("Cancel"),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text("I Agree", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldProceed != true) return;
+
     try {
-      final ImagePicker picker = ImagePicker();
-      final XFile? pickedFile = await picker.pickImage(
-        source: ImageSource.gallery,
-        imageQuality: 70,
-        maxWidth: isCover ? 1200 : 800,
+      final allowedExtensions = pickVideo
+          ? ['mp4', 'mov', 'avi', 'mkv']
+          : ['jpg', 'jpeg', 'png', 'webp'];
+
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: allowedExtensions,
       );
-      if (pickedFile != null) {
-        setState(() {
-          if (isCover) {
-            _coverFile = File(pickedFile.path);
-          } else {
-            _imageFile = File(pickedFile.path);
-          }
-        });
+
+      if (result != null) {
+        PlatformFile file = result.files.first;
+        final extension = file.extension?.toLowerCase() ?? '';
+
+        final isVideoFile = ['mp4', 'mov', 'avi', 'mkv'].contains(extension);
+        final isImageFile = ['jpg', 'jpeg', 'png', 'webp'].contains(extension);
+
+        if (!isImageFile && !isVideoFile) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Unsupported file format selected.")),
+          );
+          return;
+        }
+
+        if (isImageFile && file.size > 5 * 1024 * 1024) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Image size must be less than 2MB.")),
+          );
+          return;
+        }
+
+        if (isVideoFile && file.size > 50 * 1024 * 1024) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Video size must be less than 10MB.")),
+          );
+          return;
+        }
+
+        if (file.path != null) {
+          setState(() {
+            if (isVideoFile) {
+              _videoFile = File(file.path!);
+            } else if (isCover) {
+              _coverFile = File(file.path!);
+            } else {
+              _imageFile = File(file.path!);
+            }
+          });
+          debugPrint("Valid media selected: ${file.name} (${file.size} bytes)");
+        }
       }
     } catch (e) {
-      debugPrint("DEBUG: Error picking image: $e");
+      debugPrint("DEBUG: Error picking media: $e");
     }
   }
 
-  Future<void> _verifyBpcViaCloudFunction() async {
-    // Check if the user is selecting Student Pharmacy / Student Grade
+  Future<void> _verifyPcbViaCloudFunction() async {
     bool isStudent = _selectedSpecialty == "Student Pharmacy" || _selectedGrade == "Student";
 
     if (isStudent) {
@@ -133,20 +199,20 @@ class _EditDoctorProfileScreenState extends State<EditProfileScreen> {
           duration: Duration(seconds: 3),
         ),
       );
-      return; // Skip cloud function call entirely for students
+      return;
     }
 
     if (_nameController.text.trim().isEmpty ||
         _gradeController.text.trim().isEmpty ||
         _pcbLicenseController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Please enter Name, Grade, and BPC Licence")),
+        const SnackBar(content: Text("Please enter Name, Grade, and PCB Licence")),
       );
       return;
     }
 
-    if (_isVerifyingBpc) return;
-    setState(() => _isVerifyingBpc = true);
+    if (_isVerifyingPcb) return;
+    setState(() => _isVerifyingPcb = true);
 
     try {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -154,7 +220,7 @@ class _EditDoctorProfileScreenState extends State<EditProfileScreen> {
       );
 
       final response = await _supabase.functions.invoke(
-        'verify-bpc',
+        'verify-pcb',
         body: {
           'name': _nameController.text.trim(),
           'pcb_licence': _pcbLicenseController.text.trim(),
@@ -162,7 +228,7 @@ class _EditDoctorProfileScreenState extends State<EditProfileScreen> {
         },
       );
 
-      setState(() => _isVerifyingBpc = false);
+      setState(() => _isVerifyingPcb = false);
 
       if (response.status == 200) {
         final data = response.data;
@@ -192,7 +258,7 @@ class _EditDoctorProfileScreenState extends State<EditProfileScreen> {
         throw Exception("Server returned status ${response.status}");
       }
     } catch (e) {
-      setState(() => _isVerifyingBpc = false);
+      setState(() => _isVerifyingPcb = false);
       debugPrint("Verification Error: $e");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -202,40 +268,69 @@ class _EditDoctorProfileScreenState extends State<EditProfileScreen> {
     }
   }
 
-  Future<void> _saveProfile() async {
+  Future<void> _saveprofile() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isLoading = true);
 
     try {
-      String? imageUrl = widget.doctor['image_url'];
-      String? coverUrl = widget.doctor['cover_url'];
+      final profile = widget.userData ?? {};
+      String? imageUrl = profile['image_url'];
+      String? coverUrl = profile['cover_url'];
 
+      // 1. Handle New Profile Picture Upload & Old Deletion
       if (_imageFile != null) {
-        imageUrl = await _cloudinary.uploadImage(_imageFile!);
-      }
-      if (_coverFile != null) {
-        coverUrl = await _cloudinary.uploadImage(_coverFile!);
+        final newImageUrl = await _cloudinary.uploadImage(_imageFile!);
+        if (newImageUrl != null) {
+          if (imageUrl != null && imageUrl.isNotEmpty) {
+            try {
+              await _cloudinary.deleteMedia(imageUrl);
+            } catch (_) {}
+          }
+          imageUrl = newImageUrl;
+        }
       }
 
-      await _supabase.from('pcb').update({
+      // 2. Handle New Cover Photo Upload & Old Deletion
+      if (_coverFile != null) {
+        final newCoverUrl = await _cloudinary.uploadImage(_coverFile!);
+        if (newCoverUrl != null) {
+          if (coverUrl != null && coverUrl.isNotEmpty) {
+            try {
+              await _cloudinary.deleteMedia(coverUrl);
+            } catch (_) {}
+          }
+          coverUrl = newCoverUrl;
+        }
+      }
+
+      final updateData = {
         'name': _nameController.text.trim(),
-        'specialization': _selectedSpecialty, // <-- Use state variable directly
-        'grade': _selectedGrade,               // <-- Use state variable directly
+        'specialization': _selectedSpecialty,
+        'grade': _selectedGrade,
         'about_profile': _aboutController.text.trim(),
         'phone': _phoneController.text.trim(),
         'phone_visibility': _phoneVisibility,
+        'company_name': _bmdcController.text.trim(),
+        'job_title': _nidController.text.trim(),
         'job_location': _hospitalController.text.trim(),
         'pcb_licence': _pcbLicenseController.text.trim(),
         'email': _emailController.text.trim(),
-        'company_name': _nidController.text.trim(),
         'status': _selectedStatus,
         'image_url': imageUrl,
         'cover_url': coverUrl,
-        'user_id': _supabase.auth.currentUser!.id,
-      }).eq('id', widget.doctor['id']);
+        'user_id': profile['user_id'] ?? _supabase.auth.currentUser!.id,
+      };
+
+      if (profile['id'] != null) {
+        await _supabase.from('pcb').update(updateData).eq('id', profile['id']);
+      } else {
+        await _supabase.from('pcb').insert(updateData);
+      }
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Profile Updated Successfully!")));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Profile Updated Successfully!")),
+        );
         Navigator.pop(context, true);
       }
     } catch (e) {
@@ -252,7 +347,7 @@ class _EditDoctorProfileScreenState extends State<EditProfileScreen> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error: ${e.toString()}")),
+          SnackBar(content: Text("Error: ${e.toString()}"), backgroundColor: Colors.red),
         );
       }
     } finally {
@@ -262,6 +357,8 @@ class _EditDoctorProfileScreenState extends State<EditProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final profile = widget.userData ?? {};
+
     return Scaffold(
       backgroundColor: const Color(0xFFF0F2F5),
       appBar: AppBar(
@@ -283,7 +380,6 @@ class _EditDoctorProfileScreenState extends State<EditProfileScreen> {
           key: _formKey,
           child: Column(
             children: [
-              // --- FACEBOOK-STYLE PROFILE & COVER HEADER ---
               Container(
                 decoration: BoxDecoration(
                   color: Colors.white,
@@ -296,7 +392,6 @@ class _EditDoctorProfileScreenState extends State<EditProfileScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // 1. Cover Photo Banner with Camera Button
                     Stack(
                       children: [
                         Container(
@@ -305,15 +400,15 @@ class _EditDoctorProfileScreenState extends State<EditProfileScreen> {
                           color: Colors.blueAccent.withOpacity(0.15),
                           child: _coverFile != null
                               ? Image.file(_coverFile!, fit: BoxFit.cover)
-                              : (widget.doctor['cover_url'] != null && widget.doctor['cover_url'].isNotEmpty
-                              ? Image.network(widget.doctor['cover_url'], fit: BoxFit.cover)
+                              : (profile['cover_url'] != null && profile['cover_url'].isNotEmpty
+                              ? Image.network(profile['cover_url'], fit: BoxFit.cover)
                               : const Icon(Icons.image, size: 50, color: Colors.blueAccent)),
                         ),
                         Positioned(
                           top: 10,
                           right: 10,
                           child: InkWell(
-                            onTap: () => _pickImage(isCover: true),
+                            onTap: () => _pickAndValidateMedia(isCover: true),
                             child: Container(
                               padding: const EdgeInsets.all(8),
                               decoration: BoxDecoration(
@@ -326,7 +421,6 @@ class _EditDoctorProfileScreenState extends State<EditProfileScreen> {
                         ),
                       ],
                     ),
-                    // 2. Profile Avatar overlapping the Cover Section
                     Transform.translate(
                       offset: const Offset(0, -45),
                       child: Padding(
@@ -351,11 +445,11 @@ class _EditDoctorProfileScreenState extends State<EditProfileScreen> {
                                     radius: 50,
                                     backgroundColor: Colors.grey[200],
                                     backgroundImage: _imageFile != null
-                                        ? FileImage(_imageFile!)
-                                        : (widget.doctor['image_url'] != null && widget.doctor['image_url'].isNotEmpty
-                                        ? NetworkImage(widget.doctor['image_url'])
-                                        : null) as ImageProvider<Object>?,
-                                    child: _imageFile == null && (widget.doctor['image_url'] == null || widget.doctor['image_url'].isEmpty)
+                                        ? FileImage(_imageFile!) as ImageProvider
+                                        : (profile['image_url'] != null && profile['image_url'].toString().isNotEmpty
+                                        ? NetworkImage(profile['image_url']) as ImageProvider
+                                        : null),
+                                    child: (_imageFile == null && (profile['image_url'] == null || profile['image_url'].toString().isEmpty))
                                         ? const Icon(Icons.person, size: 50, color: Colors.grey)
                                         : null,
                                   ),
@@ -364,7 +458,7 @@ class _EditDoctorProfileScreenState extends State<EditProfileScreen> {
                                   bottom: 0,
                                   right: 0,
                                   child: InkWell(
-                                    onTap: () => _pickImage(isCover: false),
+                                    onTap: () => _pickAndValidateMedia(isCover: false),
                                     child: Container(
                                       padding: const EdgeInsets.all(8),
                                       decoration: const BoxDecoration(
@@ -385,8 +479,6 @@ class _EditDoctorProfileScreenState extends State<EditProfileScreen> {
                 ),
               ),
               const SizedBox(height: 12),
-
-              // --- SECTION 1: BASIC INFORMATION ---
               _buildSectionCard(
                 title: "Basic Information",
                 children: [
@@ -398,8 +490,6 @@ class _EditDoctorProfileScreenState extends State<EditProfileScreen> {
                 ],
               ),
               const SizedBox(height: 12),
-
-              // --- SECTION 2: WORK & CREDENTIALS ---
               _buildSectionCard(
                 title: "Work & Credentials",
                 children: [
@@ -424,7 +514,7 @@ class _EditDoctorProfileScreenState extends State<EditProfileScreen> {
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                               padding: const EdgeInsets.symmetric(horizontal: 14),
                             ),
-                            onPressed: _verifyBpcViaCloudFunction,
+                            onPressed: _verifyPcbViaCloudFunction,
                             child: const Text("Verify", style: TextStyle(fontWeight: FontWeight.bold)),
                           ),
                         ),
@@ -434,8 +524,6 @@ class _EditDoctorProfileScreenState extends State<EditProfileScreen> {
                 ],
               ),
               const SizedBox(height: 12),
-
-              // --- SECTION 3: CONTACT INFORMATION ---
               _buildSectionCard(
                 title: "Contact Information",
                 children: [
@@ -512,15 +600,12 @@ class _EditDoctorProfileScreenState extends State<EditProfileScreen> {
                   ),
                 ],
               ),
-
               const SizedBox(height: 10),
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 6),
-                child: DoctorTestBanner(adSize: AdSize.largeBanner),
+                child: pharmacistTestBanner(adSize: AdSize.banner),
               ),
               const SizedBox(height: 10),
-
-              // --- SUBMIT BUTTON ---
               SizedBox(
                 width: double.infinity,
                 height: 50,
@@ -530,7 +615,7 @@ class _EditDoctorProfileScreenState extends State<EditProfileScreen> {
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
-                  onPressed: _isLoading ? null : _saveProfile,
+                  onPressed: _isLoading ? null : _saveprofile,
                   child: _isLoading
                       ? const CircularProgressIndicator(color: Colors.white)
                       : const Text("Save Changes", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),

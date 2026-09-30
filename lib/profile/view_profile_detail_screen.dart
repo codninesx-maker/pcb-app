@@ -1,43 +1,44 @@
-import 'package:doctor_profile/admobs/ads_test_banner.dart';
-import 'package:doctor_profile/dashboard/post/like_coments_share.dart';
-import 'package:doctor_profile/profile/edit_profile_screen.dart';
-import 'package:doctor_profile/stats/followers_screen.dart';
-import 'package:doctor_profile/stats/views_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
+import 'package:pharmacist_profile/admobs/ads_test_banner.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../stats/views_screen.dart';
+import '../stats/followers_screen.dart';
+import 'edit_profile_screen.dart';
+import '../dashboard/post/like_coments_share.dart';
 
-class ProfileDetailScreen extends StatefulWidget {
-  final Map<String, dynamic> doctor;
-  const ProfileDetailScreen({super.key, required this.doctor});
+class profileDetailScreen extends StatefulWidget {
+  final Map<String, dynamic> profile;
+
+  // FIX: Removed the redundant `profiles` parameter
+  const profileDetailScreen({super.key, required this.profile});
 
   @override
-  State<ProfileDetailScreen> createState() => _ProfileDetailScreenState();
+  State<profileDetailScreen> createState() => _profileDetailScreenState();
 }
 
-class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
-  late Map<String, dynamic> _doctor;
-  bool _isUpdatingFollower = false;
+class _profileDetailScreenState extends State<profileDetailScreen> {
+  late Map<String, dynamic> _profile;
+  bool _isFollowing = false;
 
-  // Helper to reliably find the user_id or pcb row id
-  String? get _targetUserId => _doctor['user_id']?.toString();
-  String? get _targetPcbId => _doctor['id']?.toString();
+  String? get _targetUserId => _profile['user_id']?.toString();
+  String? get _targetPcbId => _profile['id']?.toString();
 
   @override
   void initState() {
     super.initState();
-    _doctor = widget.doctor;
-    _refreshData(); // Fetch fresh profile info and counts first
-    _initializeProfile();
+    _profile = widget.profile;
+    _refreshData();
+    _initializeprofile();
+    _checkFollowStatus();
   }
 
-  // Helper to safely obtain the user/profile ID regardless of navigation source
   String? get _targetId =>
-      (_doctor['user_id'] ?? _doctor['id'] ?? _doctor['uuid'])?.toString();
+      (_profile['user_id'] ?? _profile['id'] ?? _profile['uuid'])?.toString();
 
-  Future<void> _incrementViewCount(Map<String, dynamic> freshProfile) async {
+  Future<void> _incrementViewCount(Map<String, dynamic> freshprofile) async {
     try {
       final currentUserId = Supabase.instance.client.auth.currentUser?.id;
       final profileOwnerId = _targetId;
@@ -45,11 +46,10 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
       if (currentUserId != null &&
           profileOwnerId != null &&
           currentUserId != profileOwnerId) {
-        final currentCount = (freshProfile['view_count'] as num?)?.toInt() ?? 0;
+        final currentCount = (freshprofile['view_count'] as num?)?.toInt() ?? 0;
         final newCount = currentCount + 1;
 
-        // Update view count in PCB table
-        final pcbId = freshProfile['id'] ?? profileOwnerId;
+        final pcbId = freshprofile['id'] ?? profileOwnerId;
         await Supabase.instance.client
             .from('pcb')
             .update({'view_count': newCount})
@@ -57,7 +57,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
 
         if (mounted) {
           setState(() {
-            _doctor['view_count'] = newCount;
+            _profile['view_count'] = newCount;
           });
         }
 
@@ -81,7 +81,6 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
     }
 
     try {
-      // 1. Fetch updated profile data safely avoiding null type mismatch
       List<Map<String, dynamic>> responseList;
 
       if (userId != null && pcbId != null) {
@@ -109,7 +108,6 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
       final response = Map<String, dynamic>.from(responseList.first);
       final String actualUserId = response['user_id']?.toString() ?? userId ?? pcbId!;
 
-      // 2. Fetch live counts accurately using the resolved user identifier
       final followersRes = await Supabase.instance.client
           .from('pcb_followers')
           .select('*')
@@ -134,7 +132,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
 
       if (mounted) {
         setState(() {
-          _doctor = response;
+          _profile = response;
         });
         _incrementViewCount(response);
       }
@@ -143,68 +141,83 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
     }
   }
 
-  Future<void> _addFollower() async {
-    if (_isUpdatingFollower) return;
-    setState(() => _isUpdatingFollower = true);
+  Future<void> _toggleFollow() async {
+    final currentUser = Supabase.instance.client.auth.currentUser;
+    if (currentUser == null || _targetId == null) return;
 
     try {
-      final currentUserId = Supabase.instance.client.auth.currentUser?.id;
+      if (_isFollowing) {
+        // --- UNFOLLOW: Delete row ---
+        await Supabase.instance.client
+            .from('pcb_followers')
+            .delete()
+            .eq('follower_id', currentUser.id)
+            .eq('following_id', _targetId!);
 
-      if (currentUserId == null) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("You must be logged in to follow.")),
-          );
-        }
-        setState(() => _isUpdatingFollower = false);
-        return;
-      }
+        setState(() {
+          _isFollowing = false;
+          int currentCount = int.tryParse(_profile['followers_count']?.toString() ?? '0') ?? 0;
+          _profile['followers_count'] = currentCount > 0 ? currentCount - 1 : 0;
+        });
 
-      final targetDoctorId = _targetId;
-
-      if (targetDoctorId == null || currentUserId == targetDoctorId) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("You cannot follow yourself.")),
-          );
-        }
-        setState(() => _isUpdatingFollower = false);
-        return;
-      }
-
-      await Supabase.instance.client.from('pcb_followers').insert({
-        'follower_id': currentUserId,
-        'following_id': targetDoctorId,
-      });
-
-      await _refreshData();
-
-      if (mounted) {
-        setState(() => _isUpdatingFollower = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Successfully followed!")),
+          const SnackBar(content: Text("Unfollowed")),
+        );
+      } else {
+        // --- FOLLOW: Insert row ---
+        await Supabase.instance.client
+            .from('pcb_followers')
+            .insert({
+          'follower_id': currentUser.id,
+          'following_id': _targetId!,
+        });
+
+        setState(() {
+          _isFollowing = true;
+          int currentCount = int.tryParse(_profile['followers_count']?.toString() ?? '0') ?? 0;
+          _profile['followers_count'] = currentCount + 1;
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Following")),
         );
       }
     } catch (e) {
-      if (mounted) {
-        setState(() => _isUpdatingFollower = false);
-        final errorMessage = e.toString().contains('duplicate key')
-            ? "You are already following this profile."
-            : "Failed to follow: $e";
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(errorMessage)),
-        );
-      }
+      debugPrint("Error toggling follow: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Failed to update follow status.")),
+      );
     }
   }
 
-  Future<void> _initializeProfile() async {
+  Future<void> _checkFollowStatus() async {
+    final currentUser = Supabase.instance.client.auth.currentUser;
+    final targetId = _targetId;
+    if (currentUser == null || targetId == null) return;
+
+    try {
+      final response = await Supabase.instance.client
+          .from('pcb_followers')
+          .select('id')
+          .eq('follower_id', currentUser.id)
+          .eq('following_id', targetId)
+          .maybeSingle();
+
+      if (mounted) {
+        setState(() {
+          _isFollowing = response != null; // True if record exists, false otherwise
+        });
+      }
+    } catch (e) {
+      debugPrint("Error checking follow status: $e");
+    }
+  }
+
+  Future<void> _initializeprofile() async {
     final targetUserId = _targetId;
     if (targetUserId == null || targetUserId.isEmpty) return;
 
     try {
-      // Fetch the complete doctor/profile row from the 'pcb' table using the user_id or id
       final responseList = await Supabase.instance.client
           .from('pcb')
           .select()
@@ -212,16 +225,14 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
           .limit(1);
 
       if (responseList.isNotEmpty) {
-        // Merge or replace with the full database profile so all fields exist
         setState(() {
-          _doctor = Map<String, dynamic>.from(responseList.first);
+          _profile = Map<String, dynamic>.from(responseList.first);
         });
       }
     } catch (e) {
       debugPrint("Error fetching full profile on init: $e");
     }
 
-    // Now refresh counts and view stats with the guaranteed full record
     await _refreshData();
   }
 
@@ -230,43 +241,46 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
     await launchUrl(launchUri);
   }
 
-  String _formatTimeAgo(String? dateTimeStr) {
-    if (dateTimeStr == null) return '';
-    try {
-      final dateTime = DateTime.parse(dateTimeStr).toLocal();
-      final now = DateTime.now();
-      final difference = now.difference(dateTime);
-
-      if (difference.inSeconds < 60) {
-        return 'Just now';
-      } else if (difference.inMinutes < 60) {
-        return '${difference.inMinutes}m ago';
-      } else if (difference.inHours < 24) {
-        return '${difference.inHours}h ago';
-      } else if (difference.inDays < 7) {
-        return '${difference.inDays}d ago';
-      } else {
-        return '${dateTime.day}/${dateTime.month}/${dateTime.year}';
-      }
-    } catch (e) {
-      return '';
-    }
+  void _showFullImage(BuildContext context, String imageUrl) {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        backgroundColor: Colors.black,
+        insetPadding: EdgeInsets.zero,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            InteractiveViewer(
+              child: Image.network(imageUrl, fit: BoxFit.contain),
+            ),
+            Positioned(
+              top: 40,
+              right: 20,
+              child: IconButton(
+                icon: const Icon(Icons.close, color: Colors.white, size: 30),
+                onPressed: () => Navigator.pop(context),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final currentUser = Supabase.instance.client.auth.currentUser;
     final String? authEmail = currentUser?.email?.trim().toLowerCase();
-    final String? docEmail = _doctor['email']?.toString().trim().toLowerCase();
+    final String? docEmail = _profile['email']?.toString().trim().toLowerCase();
 
     final bool isOwner = (currentUser != null &&
         authEmail != null &&
         docEmail != null &&
         authEmail == docEmail);
 
-    final String? imageUrl = (_doctor['image_url'] != null &&
-        _doctor['image_url'].toString().isNotEmpty)
-        ? _doctor['image_url']
+    final String? imageUrl = (_profile['image_url'] != null &&
+        _profile['image_url'].toString().isNotEmpty)
+        ? _profile['image_url']
         : null;
 
     return Scaffold(
@@ -279,7 +293,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
           onPressed: () => Navigator.pop(context),
         ),
         title: const Text(
-          "Profile Details",
+          "profile Details",
           style: TextStyle(
               fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black),
         ),
@@ -292,7 +306,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                 final result = await Navigator.push(
                     context,
                     MaterialPageRoute(
-                        builder: (_) => EditProfileScreen(doctor: _doctor)));
+                        builder: (_) => EditprofileScreen(userData: _profile)));
                 if (result == true) await _refreshData();
               },
             )
@@ -302,7 +316,6 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
         padding: const EdgeInsets.all(12),
         child: Column(
           children: [
-            // --- HEADER ---
             Container(
               decoration: BoxDecoration(
                 color: Colors.white,
@@ -320,9 +333,9 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                 children: [
                   GestureDetector(
                     onTap: () {
-                      final coverUrl = (_doctor['cover_url'] != null &&
-                          _doctor['cover_url'].toString().isNotEmpty)
-                          ? _doctor['cover_url']
+                      final coverUrl = (_profile['cover_url'] != null &&
+                          _profile['cover_url'].toString().isNotEmpty)
+                          ? _profile['cover_url']
                           : imageUrl;
 
                       if (coverUrl != null) {
@@ -333,10 +346,10 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                       height: 160,
                       width: double.infinity,
                       color: Colors.blueAccent.withOpacity(0.15),
-                      child: (_doctor['cover_url'] != null &&
-                          _doctor['cover_url'].toString().isNotEmpty)
+                      child: (_profile['cover_url'] != null &&
+                          _profile['cover_url'].toString().isNotEmpty)
                           ? Image.network(
-                        _doctor['cover_url'],
+                        _profile['cover_url'],
                         fit: BoxFit.cover,
                         errorBuilder: (context, error, stackTrace) =>
                         const SizedBox(),
@@ -400,7 +413,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                                         width: 12,
                                         height: 12,
                                         decoration: BoxDecoration(
-                                          color: _doctor['status'] ==
+                                          color: _profile['status'] ==
                                               "Available"
                                               ? Colors.green
                                               : Colors.redAccent,
@@ -425,7 +438,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                               children: [
                                 _buildStatItem(
                                   "Views",
-                                  "${_doctor['view_count'] ?? 0}",
+                                  "${_profile['view_count'] ?? 0}",
                                   Icons.remove_red_eye_outlined,
                                   onTap: () {
                                     final ownerId = _targetId;
@@ -441,7 +454,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                                 ),
                                 _buildStatItem(
                                   "Followers",
-                                  "${_doctor['followers_count'] ?? 0}",
+                                  "${_profile['followers_count'] ?? 0}",
                                   Icons.people_outline,
                                   onTap: () {
                                     final targetId = _targetId;
@@ -451,15 +464,15 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                                       context,
                                       MaterialPageRoute(
                                         builder: (_) => FollowersScreen(
-                                            doctorId: targetId),
+                                            profileId: targetId),
                                       ),
                                     );
                                   },
-                                  onDoubleTap: _addFollower,
+                                  onDoubleTap: _toggleFollow,
                                 ),
                                 _buildStatItem(
                                   "Following",
-                                  "${_doctor['following_count'] ?? 0}",
+                                  "${_profile['following_count'] ?? 0}",
                                   Icons.person_add_alt_outlined,
                                   onTap: () {
                                     final targetId = _targetId;
@@ -469,7 +482,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                                       context,
                                       MaterialPageRoute(
                                         builder: (_) => FollowersScreen(
-                                          doctorId: targetId,
+                                          profileId: targetId,
                                           listType: FollowListType.following,
                                         ),
                                       ),
@@ -478,7 +491,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                                 ),
                                 _buildStatItem(
                                   "Posts",
-                                  "${_doctor['posts_count'] ?? 0}",
+                                  "${_profile['posts_count'] ?? 0}",
                                   Icons.article_outlined,
                                 ),
                               ],
@@ -494,57 +507,54 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
             ),
             const SizedBox(height: 12),
 
-            // --- BASIC INFO ---
             _buildSectionCard(
               title: "Basic Information",
               children: [
-                _buildDisplayField("Full Name", _doctor['name'] ?? "N/A",
+                _buildDisplayField("Full Name", _profile['name'] ?? "N/A",
                     icon: Icons.badge),
                 _buildDisplayField(
-                    "Specialty", _doctor['specialization'] ?? "N/A",
+                    "Specialty", _profile['specialization'] ?? "N/A",
                     icon: Icons.medical_services_outlined),
-                _buildDisplayField("Grade", _doctor['grade'] ?? "N/A",
+                _buildDisplayField("Grade", _profile['grade'] ?? "N/A",
                     icon: Icons.military_tech_outlined),
                 _buildDisplayField(
-                    "Availability Status", _doctor['status'] ?? "N/A",
+                    "Availability Status", _profile['status'] ?? "N/A",
                     icon: Icons.circle,
-                    iconColor: _doctor['status'] == "Available"
+                    iconColor: _profile['status'] == "Available"
                         ? Colors.green
                         : Colors.redAccent),
-                _buildDisplayField("Bio", _doctor['about_profile'] ?? "N/A",
+                _buildDisplayField("Bio", _profile['about_profile'] ?? "N/A",
                     icon: Icons.info_outline, maxLines: 4),
               ],
             ),
             const SizedBox(height: 12),
 
-            // --- WORK & CREDENTIALS ---
             _buildSectionCard(
               title: "Work & Credentials",
               children: [
-                _buildDisplayField("Company Name", _doctor['company_name'] ?? "N/A",
+                _buildDisplayField("Company Name", _profile['company_name'] ?? "N/A",
                     icon: Icons.business),
-                _buildDisplayField("Job Title", _doctor['chamber_name'] ?? "N/A",
+                _buildDisplayField("Job Title", _profile['chamber_name'] ?? "N/A",
                     icon: Icons.work_outline),
                 _buildDisplayField(
-                    "Company Location", _doctor['job_location'] ?? "N/A",
+                    "Company Location", _profile['job_location'] ?? "N/A",
                     icon: Icons.location_on_outlined),
-                _buildDisplayField("BPC Licence #", _doctor['pcb_licence'] ?? "N/A",
+                _buildDisplayField("PCB Licence #", _profile['pcb_licence'] ?? "N/A",
                     icon: Icons.verified_outlined),
               ],
             ),
             const SizedBox(height: 12),
 
-            // --- CONTACT ---
             _buildSectionCard(
               title: "Contact Information",
               children: [
-                _buildDisplayField("Email Address", _doctor['email'] ?? "N/A",
+                _buildDisplayField("Email Address", _profile['email'] ?? "N/A",
                     icon: Icons.email_outlined),
                 Builder(
                   builder: (context) {
                     final String visibility =
-                        _doctor['phone_visibility'] ?? "Public";
-                    final String rawPhone = _doctor['phone'] ?? "N/A";
+                        _profile['phone_visibility'] ?? "Public";
+                    final String rawPhone = _profile['phone'] ?? "N/A";
                     final String displayPhone = visibility == "Private"
                         ? "🔒 Private (Hidden)"
                         : rawPhone;
@@ -566,14 +576,12 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
             ),
             const SizedBox(height: 10),
 
-            // --- ADSMOB ---
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 6),
-              child: DoctorTestBanner(adSize: AdSize.largeBanner),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: pharmacistTestBanner(adSize: AdSize.banner),
             ),
             const SizedBox(height: 16),
 
-            // --- POSTS ---
             const Align(
               alignment: Alignment.centerLeft,
               child: Padding(
@@ -603,7 +611,23 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                           child: CircularProgressIndicator()));
                 }
 
-                final userPosts = snapshot.data ?? [];
+                // FIX APPLIED HERE: Map and normalize video/media fields
+                final userPosts = snapshot.data?.map((post) {
+                  final mutablePost = Map<String, dynamic>.from(post);
+
+                  mutablePost['user_name'] = _profile['name'] ?? 'Professional';
+                  mutablePost['user_avatar'] = imageUrl;
+
+                  // Normalize video URL if it's stored in video_url instead of media_url
+                  if ((mutablePost['media_url'] == null || mutablePost['media_url'].toString().isEmpty) &&
+                      (mutablePost['video_url'] != null && mutablePost['video_url'].toString().isNotEmpty)) {
+                    mutablePost['media_url'] = mutablePost['video_url'];
+                    mutablePost['media_type'] = 'video';
+                  }
+
+                  return mutablePost;
+                }).toList() ?? [];
+
                 if (userPosts.isEmpty) {
                   return Container(
                     width: double.infinity,
@@ -626,12 +650,6 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                   itemBuilder: (context, index) {
                     final post = userPosts[index];
                     final content = post['content'] ?? '';
-                    final postImageUrl = post['image_url'];
-                    final createdAt = post['created_at'];
-
-                    // Inject profile details so they match the target user profile
-                    post['user_name'] = _doctor['name'] ?? 'Professional';
-                    post['user_avatar'] = imageUrl;
 
                     final currentUserId = Supabase.instance.client.auth.currentUser?.id;
                     final postUserId = post['user_id'];
@@ -680,7 +698,6 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                                       title: const Text("Delete Post"),
                                       onTap: () {
                                         Navigator.pop(context);
-                                        // Trigger your delete confirmation or handler if you have one here
                                       },
                                     ),
                                   ] else ...[
@@ -818,7 +835,10 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
           maxLines: maxLines,
           overflow: TextOverflow.ellipsis,
           style: const TextStyle(
-              fontSize: 15, fontWeight: FontWeight.w600, color: Colors.black87),
+            fontSize: 14,
+            color: Colors.black87,
+            fontWeight: FontWeight.w500,
+          ),
         ),
       ),
     );
@@ -826,75 +846,47 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
 
   Widget _buildInteractivePhoneField(String label, String value,
       {IconData? icon}) {
+    final bool isPrivate = value.contains("Private");
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
-      child: InkWell(
-        onTap: () => _makePhoneCall(value),
-        child: InputDecorator(
-          decoration: InputDecoration(
-            labelText: label,
-            labelStyle: const TextStyle(color: Colors.grey, fontSize: 13),
-            prefixIcon: icon != null
-                ? Icon(icon, color: Colors.blueAccent, size: 22)
-                : null,
-            filled: true,
-            fillColor: const Color(0xFFF7F8FA),
-            contentPadding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: BorderSide.none,
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: BorderSide(color: Colors.grey.shade300, width: 1),
-            ),
+      child: InputDecorator(
+        decoration: InputDecoration(
+          labelText: label,
+          labelStyle: const TextStyle(color: Colors.grey, fontSize: 13),
+          prefixIcon: icon != null
+              ? const Icon(Icons.phone_outlined,
+              color: Colors.blueAccent, size: 22)
+              : null,
+          suffixIcon: !isPrivate
+              ? IconButton(
+            icon: const Icon(Icons.call, color: Colors.green),
+            onPressed: () {
+              final rawPhone = _profile['phone'];
+              if (rawPhone != null) {
+                _makePhoneCall(rawPhone.toString());
+              }
+            },
+          )
+              : null,
+          filled: true,
+          fillColor: const Color(0xFFF7F8FA),
+          contentPadding:
+          const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide.none,
           ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                value,
-                style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.blue),
-              ),
-              const Icon(Icons.phone_forwarded,
-                  size: 18, color: Colors.blueAccent),
-            ],
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(color: Colors.grey.shade300, width: 1),
           ),
         ),
-      ),
-    );
-  }
-
-  void _showFullImage(BuildContext context, String imageUrl) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => Scaffold(
-          backgroundColor: Colors.black,
-          appBar: AppBar(
-            backgroundColor: Colors.black,
-            elevation: 0,
-            leading: IconButton(
-              icon: const Icon(Icons.close, color: Colors.white),
-              onPressed: () => Navigator.pop(context),
-            ),
-          ),
-          body: Center(
-            child: Hero(
-              tag: 'profile_image',
-              child: InteractiveViewer(
-                minScale: 0.5,
-                maxScale: 4.0,
-                clipBehavior: Clip.none,
-                child: Image.network(
-                  imageUrl,
-                  fit: BoxFit.contain,
-                ),
-              ),
-            ),
+        child: Text(
+          value,
+          style: const TextStyle(
+            fontSize: 14,
+            color: Colors.black87,
+            fontWeight: FontWeight.w500,
           ),
         ),
       ),

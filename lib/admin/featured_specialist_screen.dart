@@ -13,14 +13,14 @@ class AdminFeaturedSpecialistsScreen extends StatefulWidget {
 class _AdminFeaturedSpecialistsScreenState extends State<AdminFeaturedSpecialistsScreen> {
   final _supabase = Supabase.instance.client;
   List<Map<String, dynamic>> _profile = [];
-  List<Map<String, dynamic>> _filteredProfile = [];
+  List<Map<String, dynamic>> _filteredprofile = [];
   bool _isLoading = true;
   final _searchController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    _fetchProfile();
+    _fetchprofile();
   }
 
   @override
@@ -29,18 +29,18 @@ class _AdminFeaturedSpecialistsScreenState extends State<AdminFeaturedSpecialist
     super.dispose();
   }
 
-  Future<void> _fetchProfile() async {
+  Future<void> _fetchprofile() async {
     try {
       final data = await _supabase.from('pcb').select().order('name');
       if (mounted) {
         setState(() {
           _profile = data;
-          _filteredProfile = data;
+          _filteredprofile = data;
           _isLoading = false;
         });
       }
     } catch (e) {
-      debugPrint("Error fetching doctors: $e");
+      debugPrint("Error fetching profile: $e");
       if (mounted) {
         setState(() {
           _isLoading = false;
@@ -49,9 +49,9 @@ class _AdminFeaturedSpecialistsScreenState extends State<AdminFeaturedSpecialist
     }
   }
 
-  void _filterDoctors(String query) {
+  void _filterprofile(String query) {
     setState(() {
-      _filteredProfile = _profile.where((profile) {
+      _filteredprofile = _profile.where((profile) {
         final name = (profile['name'] ?? "").toLowerCase();
         final specialty = (profile['specialization'] ?? "").toLowerCase();
         return name.contains(query.toLowerCase()) ||
@@ -60,15 +60,15 @@ class _AdminFeaturedSpecialistsScreenState extends State<AdminFeaturedSpecialist
     });
   }
 
-  Future<void> _toggleFeatured(Map<String, dynamic> doctor, bool value) async {
+  Future<void> _toggleFeatured(Map<String, dynamic> profile, bool value) async {
     try {
       await _supabase
           .from('pcb')
           .update({'is_featured': value})
-          .eq('id', doctor['id']);
+          .eq('id', profile['id']);
 
       setState(() {
-        doctor['is_featured'] = value;
+        profile['is_featured'] = value;
       });
     } catch (e) {
       debugPrint("Error: $e");
@@ -90,7 +90,7 @@ class _AdminFeaturedSpecialistsScreenState extends State<AdminFeaturedSpecialist
             padding: const EdgeInsets.all(16.0),
             child: TextField(
               controller: _searchController,
-              onChanged: _filterDoctors,
+              onChanged: _filterprofile,
               decoration: InputDecoration(
                 hintText: "Search specialists...",
                 prefixIcon: const Icon(Icons.search, color: Colors.blueAccent),
@@ -109,22 +109,22 @@ class _AdminFeaturedSpecialistsScreenState extends State<AdminFeaturedSpecialist
                 ? const Center(
                 child: CircularProgressIndicator(color: Colors.blueAccent))
                 : RefreshIndicator(
-              onRefresh: _fetchProfile,
+              onRefresh: _fetchprofile,
               child: ListView.builder(
-                itemCount: _filteredProfile.length,
+                itemCount: _filteredprofile.length,
                 itemBuilder: (context, index) {
-                  final doctor = _filteredProfile[index];
+                  final profile = _filteredprofile[index];
                   return Card(
                     margin: const EdgeInsets.symmetric(
                         horizontal: 16, vertical: 6),
                     child: SwitchListTile(
                       activeColor: Colors.blueAccent,
-                      title: Text(doctor['name'], style: const TextStyle(
+                      title: Text(profile['name'], style: const TextStyle(
                           fontWeight: FontWeight.bold)),
                       subtitle: Text(
-                          doctor['specialization'] ?? "No Specialty"),
-                      value: (doctor['is_featured'] as bool?) ?? false,
-                      onChanged: (bool value) => _toggleFeatured(doctor, value),
+                          profile['specialization'] ?? "No Specialty"),
+                      value: (profile['is_featured'] as bool?) ?? false,
+                      onChanged: (bool value) => _toggleFeatured(profile, value),
                     ),
                   );
                 },

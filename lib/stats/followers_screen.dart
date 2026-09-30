@@ -1,16 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:doctor_profile/profile/view_profile_detail_screen.dart';
+import '../profile/view_profile_detail_screen.dart';
 
 enum FollowListType { followers, following }
 
 class FollowersScreen extends StatefulWidget {
-  final String doctorId; // Matches what you are passing in your onTap
+  final String profileId; // Matches what you are passing in your onTap
   final FollowListType listType; // Optional, defaults to followers
 
   const FollowersScreen({
     super.key,
-    required this.doctorId,
+    required this.profileId,
     this.listType = FollowListType.followers, // Defaults so you don't break existing calls
   });
 
@@ -37,7 +37,7 @@ class _FollowersScreenState extends State<FollowersScreen> {
         final response = await _supabase
             .from('pcb_followers')
             .select('follower_id')
-            .eq('following_id', widget.doctorId);
+            .eq('following_id', widget.profileId);
 
         for (var item in response) {
           final targetUserId = item['follower_id'];
@@ -57,7 +57,7 @@ class _FollowersScreenState extends State<FollowersScreen> {
         final response = await _supabase
             .from('pcb_followers')
             .select('following_id')
-            .eq('follower_id', widget.doctorId);
+            .eq('follower_id', widget.profileId);
 
         for (var item in response) {
           final targetUserId = item['following_id'];
@@ -172,7 +172,7 @@ class _FollowersScreenState extends State<FollowersScreen> {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => ProfileDetailScreen(doctor: userData),
+                    builder: (context) => profileDetailScreen(profile: userData),
                   ),
                 );
               },

@@ -1,4 +1,4 @@
-import 'package:doctor_profile/profile/view_profile_detail_screen.dart';
+import 'package:pharmacist_profile/profile/view_profile_detail_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -36,7 +36,7 @@ class _CommentsBottomSheetState extends State<CommentsBottomSheet> {
   @override
   void initState() {
     super.initState();
-    _fetchCurrentUserProfile();
+    _fetchCurrentUserprofile();
     _fetchComments();
     _setupCommentsRealtime();
   }
@@ -48,7 +48,7 @@ class _CommentsBottomSheetState extends State<CommentsBottomSheet> {
     super.dispose();
   }
 
-  Future<void> _fetchCurrentUserProfile() async {
+  Future<void> _fetchCurrentUserprofile() async {
     try {
       final user = _supabase.auth.currentUser;
       if (user != null) {
@@ -296,7 +296,7 @@ class _CommentsBottomSheetState extends State<CommentsBottomSheet> {
     );
   }
 
-  Future<void> _navigateToProfile(String? userId) async {
+  Future<void> _navigateToprofile(String? userId) async {
     if (userId == null) return;
 
     showDialog(
@@ -306,7 +306,7 @@ class _CommentsBottomSheetState extends State<CommentsBottomSheet> {
     );
 
     try {
-      final fullProfile = await _supabase
+      final fullprofile = await _supabase
           .from('pcb')
           .select()
           .eq('user_id', userId)
@@ -315,12 +315,12 @@ class _CommentsBottomSheetState extends State<CommentsBottomSheet> {
       if (context.mounted) {
         Navigator.pop(context);
 
-        if (fullProfile != null) {
+        if (fullprofile != null) {
           Navigator.pop(context);
           Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (context) => ProfileDetailScreen(doctor: fullProfile),
+              builder: (context) => profileDetailScreen(profile: fullprofile),
             ),
           );
         } else {
@@ -497,7 +497,7 @@ class _CommentsBottomSheetState extends State<CommentsBottomSheet> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     GestureDetector(
-                      onTap: () => _navigateToProfile(commentUserId),
+                      onTap: () => _navigateToprofile(commentUserId),
                       child: CircleAvatar(
                         radius: 18,
                         backgroundColor: Colors.blueAccent.withOpacity(0.1),
@@ -535,7 +535,7 @@ class _CommentsBottomSheetState extends State<CommentsBottomSheet> {
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
                                         InkWell(
-                                          onTap: () => _navigateToProfile(commentUserId),
+                                          onTap: () => _navigateToprofile(commentUserId),
                                           child: Text(
                                             name,
                                             style: const TextStyle(

@@ -1,6 +1,6 @@
 {
-    "name": "doctor_profile",
-    "short_name": "doctor_profile",
+    "name": "pharmacist_profile",
+    "short_name": "pharmacist_profile",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

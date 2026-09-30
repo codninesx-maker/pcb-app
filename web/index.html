@@ -25,7 +25,7 @@
     window.addEventListener('DOMContentLoaded', (event) => {
       const hash = window.location.hash;
 
-      // Check if user is on mobile and clicking a post deep link
+      // If mobile user clicks a post deep link
       if (hash.includes('/post/') && /Android/i.test(navigator.userAgent)) {
         const postId = hash.split('/post/')[1];
         const packageName = 'com.rxai.pcb';
@@ -40,6 +40,6 @@
   </script>
 </head>
 <body>
-  <script src="flutter_bootstrap.js" async></script>
+<script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

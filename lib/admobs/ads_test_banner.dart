@@ -1,19 +1,19 @@
-import 'package:doctor_profile/admobs/ad_helper.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
+import 'ad_helper.dart';
 
 
-class DoctorTestBanner extends StatefulWidget {
+
+class pharmacistTestBanner extends StatefulWidget {
   final AdSize adSize;
-  const DoctorTestBanner({super.key, this.adSize = AdSize.banner});
+  const pharmacistTestBanner({super.key, this.adSize = AdSize.banner});
 
   @override
-  State<DoctorTestBanner> createState() => _DoctorTestBannerState();
+  State<pharmacistTestBanner> createState() => _PharmacistTestBannerState();
 }
 
-class _DoctorTestBannerState extends State<DoctorTestBanner> with AutomaticKeepAliveClientMixin {
+class _PharmacistTestBannerState extends State<pharmacistTestBanner> with AutomaticKeepAliveClientMixin {
   BannerAd? _bannerAd;
   bool _isLoaded = false;
 
@@ -38,7 +38,7 @@ class _DoctorTestBannerState extends State<DoctorTestBanner> with AutomaticKeepA
   void _loadAd() {
     if (!mounted) return;
 
-    debugPrint("DOCTOR_UI_ADS: Requesting banner...");
+    debugPrint("profile_UI_ADS: Requesting banner...");
 
     _bannerAd = BannerAd(
       // Use your central AdHelper to keep production/debug IDs managed in one place
@@ -53,7 +53,7 @@ class _DoctorTestBannerState extends State<DoctorTestBanner> with AutomaticKeepA
           });
         },
         onAdFailedToLoad: (ad, error) {
-          debugPrint("DOCTOR_UI_ADS: Error: ${error.message}");
+          debugPrint("PHARMACIST_UI_ADS: Error: ${error.message}");
           ad.dispose();
           if (!mounted) return;
           setState(() {

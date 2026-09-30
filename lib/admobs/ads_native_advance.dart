@@ -1,16 +1,15 @@
-import 'package:doctor_profile/admobs/ad_helper.dart';
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
+import 'ad_helper.dart';
 
-
-class DoctorNativeAd extends StatefulWidget {
-  const DoctorNativeAd({super.key});
+class pharmacistNativeAd extends StatefulWidget {
+  const pharmacistNativeAd({super.key});
 
   @override
-  State<DoctorNativeAd> createState() => _DoctorNativeAdState();
+  State<pharmacistNativeAd> createState() => _pharmacistNativeAdState();
 }
 
-class _DoctorNativeAdState extends State<DoctorNativeAd> with AutomaticKeepAliveClientMixin {
+class _pharmacistNativeAdState extends State<pharmacistNativeAd> with AutomaticKeepAliveClientMixin {
   NativeAd? _nativeAd;
   bool _isLoaded = false;
 
@@ -41,7 +40,7 @@ class _DoctorNativeAdState extends State<DoctorNativeAd> with AutomaticKeepAlive
           }
         },
         onAdFailedToLoad: (ad, LoadAdError error) {
-          debugPrint('DOCTOR_NATIVE_AD_ERR: Failed to load: ${error.message}');
+          debugPrint('profile_NATIVE_AD_ERR: Failed to load: ${error.message}');
           // Must dispose of failed ads to free resources
           ad.dispose();
           if (mounted) {

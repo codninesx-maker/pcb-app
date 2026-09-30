@@ -1,16 +1,15 @@
-import 'package:doctor_profile/profile/view_profile_detail_screen.dart';
 import 'package:flutter/material.dart';
-// TODO: Import your ProfileDetailScreen here, e.g.:
-// import 'profile_detail_screen.dart';
+import 'package:pharmacist_profile/profile/view_profile_detail_screen.dart';
 
-class FeaturedProfilesSection extends StatelessWidget {
-  final Future<List<Map<String, dynamic>>> doctorsFuture;
-  final VoidCallback onProfileReturned;
 
-  const FeaturedProfilesSection({
+class FeaturedprofilesSection extends StatelessWidget {
+  final Future<List<Map<String, dynamic>>> profileFuture;
+  final VoidCallback onprofileReturned;
+
+  const FeaturedprofilesSection({
     super.key,
-    required this.doctorsFuture,
-    required this.onProfileReturned,
+    required this.profileFuture,
+    required this.onprofileReturned,
   });
 
   @override
@@ -20,16 +19,16 @@ class FeaturedProfilesSection extends StatelessWidget {
       children: [
         const SizedBox(height: 25),
         const Text(
-          "Featured Specialists",
+          "Featured Pharmacists",
           style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 15),
         FutureBuilder<List<Map<String, dynamic>>>(
-          future: doctorsFuture,
+          future: profileFuture,
           builder: (context, snapshot) {
             if (!snapshot.hasData) return const SizedBox();
 
-            final featuredDoctors = snapshot.data!
+            final featuredprofile = snapshot.data!
                 .where((d) => d['is_featured'] == true)
                 .toList()
               ..sort((a, b) {
@@ -38,24 +37,24 @@ class FeaturedProfilesSection extends StatelessWidget {
                 return bDate.compareTo(aDate);
               });
 
-            if (featuredDoctors.isEmpty) return const SizedBox();
+            if (featuredprofile.isEmpty) return const SizedBox();
 
             return SizedBox(
               height: 180,
               child: ListView.builder(
                 scrollDirection: Axis.horizontal,
-                itemCount: featuredDoctors.length,
+                itemCount: featuredprofile.length,
                 itemBuilder: (context, index) {
-                  final doctor = featuredDoctors[index];
+                  final profile = featuredprofile[index];
                   return GestureDetector(
                     onTap: () async {
                       await Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (context) => ProfileDetailScreen(doctor: doctor),
+                          builder: (context) => profileDetailScreen(profile: profile),
                         ),
                       );
-                      onProfileReturned();
+                      onprofileReturned();
                     },
                     child: Container(
                       width: 140,
@@ -75,15 +74,15 @@ class FeaturedProfilesSection extends StatelessWidget {
                         children: [
                           CircleAvatar(
                             radius: 40,
-                            backgroundImage: doctor['image_url'] != null
-                                ? NetworkImage(doctor['image_url'])
+                            backgroundImage: profile['image_url'] != null
+                                ? NetworkImage(profile['image_url'])
                                 : const NetworkImage('https://i.pravatar.cc/150'),
                           ),
                           const SizedBox(height: 10),
                           Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 8.0),
                             child: Text(
-                              doctor['name'] ?? "Unknown",
+                              profile['name'] ?? "Unknown",
                               style: const TextStyle(fontWeight: FontWeight.bold),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
@@ -94,7 +93,7 @@ class FeaturedProfilesSection extends StatelessWidget {
                           Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 8.0),
                             child: Text(
-                              doctor['specialization'] ?? "",
+                              profile['specialization'] ?? "",
                               style: const TextStyle(fontSize: 12, color: Colors.grey),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,

@@ -15,6 +15,9 @@ class _ChatScreenState extends State<ChatScreen> {
   final _supabase = Supabase.instance.client;
   final TextEditingController _messageController = TextEditingController();
 
+  // --- Toggle this to true/false to enable or disable chat functionality ---
+  static const bool _isChatEnabled = false;
+
   @override
   void dispose() {
     _messageController.dispose();
@@ -22,6 +25,8 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _sendMessage() async {
+    if (!_isChatEnabled) return; // Block sending if disabled
+
     final text = _messageController.text.trim();
     if (text.isEmpty) return;
 
@@ -40,7 +45,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final String finalAvatarUrl = widget.avatarUrl ?? 'https://ui-avatars.com/api/?name=$senderName';
 
     try {
-      await _supabase.from('chat_messages').insert({
+      await _supabase.from('pcb_chat_messages').insert({
         'user_id': user.id,
         'user_name': senderName,
         'message': text,
@@ -84,7 +89,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _deleteChatMessage(dynamic messageId) async {
     try {
-      await _supabase.from('chat_messages').delete().eq('id', messageId);
+      await _supabase.from('pcb_chat_messages').delete().eq('id', messageId);
     } catch (e) {
       debugPrint("Delete Error: $e");
     }
@@ -108,7 +113,7 @@ class _ChatScreenState extends State<ChatScreen> {
               final newText = editController.text.trim();
               if (newText.isNotEmpty) {
                 await _supabase
-                    .from('chat_messages')
+                    .from('pcb_chat_messages')
                     .update({'message': newText})
                     .eq('id', msg['id']);
               }
@@ -134,11 +139,11 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
       body: Column(
         children: [
-          // 1. Chat List
+          // 1. Chat List (Still allows viewing history)
           Expanded(
             child: StreamBuilder<List<Map<String, dynamic>>>(
               stream: _supabase
-                  .from('chat_messages')
+                  .from('pcb_chat_messages')
                   .stream(primaryKey: ['id'])
                   .order('created_at', ascending: false)
                   .limit(50),
@@ -149,7 +154,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
                 final messages = snapshot.data!;
                 if (messages.isEmpty) {
-                  return const Center(child: Text("No messages yet. Say something!"));
+                  return const Center(child: Text("No messages yet.", style: TextStyle(color: Colors.grey)));
                 }
 
                 return ListView.builder(
@@ -161,7 +166,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     final bool isMe = (msg['user_id'] != null && msg['user_id'] == currentUserId);
 
                     return GestureDetector(
-                      onLongPress: isMe ? () => _showChatOptions(context, msg) : null,
+                      onLongPress: (isMe && _isChatEnabled) ? () => _showChatOptions(context, msg) : null,
                       child: Padding(
                         padding: const EdgeInsets.only(bottom: 10.0),
                         child: Row(
@@ -209,12 +214,13 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           ),
 
-          // 2. Input Field Area
+          // 2. Disabled Input Field Area / Notice Banner
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             color: Colors.white,
             child: SafeArea(
-              child: Row(
+              child: _isChatEnabled
+                  ? Row(
                 children: [
                   Expanded(
                     child: TextField(
@@ -237,6 +243,25 @@ class _ChatScreenState extends State<ChatScreen> {
                     ),
                   ),
                 ],
+              )
+                  : Container(
+                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.grey.shade300),
+                ),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.lock_outline, size: 18, color: Colors.grey),
+                    SizedBox(width: 8),
+                    Text(
+                      "Chat is currently disabled.",
+                      style: TextStyle(color: Colors.grey, fontWeight: FontWeight.w600, fontSize: 13),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

@@ -7,7 +7,7 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
-// Load properties from key.properties
+// Load properties from key.properties safely
 val keystoreProperties = Properties()
 val keystorePropertiesFile = rootProject.file("key.properties")
 if (keystorePropertiesFile.exists()) {
@@ -28,13 +28,11 @@ android {
         jvmTarget = JavaVersion.VERSION_17.toString()
     }
 
-    // --- SIGNING CONFIGS MOVED HERE ---
     signingConfigs {
         create("release") {
-            storeFile = if (keystoreProperties.getProperty("storeFile") != null) {
-                file(keystoreProperties.getProperty("storeFile"))
-            } else {
-                null
+            val storeFilePath = keystoreProperties.getProperty("storeFile")
+            if (storeFilePath != null) {
+                storeFile = file(storeFilePath)
             }
             keyAlias = keystoreProperties.getProperty("keyAlias")
             keyPassword = keystoreProperties.getProperty("keyPassword")
@@ -59,7 +57,6 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // Now correctly references the signingConfig defined above
             signingConfig = signingConfigs.getByName("release")
         }
     }

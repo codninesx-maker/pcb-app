@@ -1,17 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:pharmacist_profile/admin/admin_pannel.dart';
+import 'package:pharmacist_profile/admin/user_login.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:doctor_profile/admin/admin_pannel.dart';
-import 'package:doctor_profile/admin/user_login.dart';
+
 
 class ThreeDotMenuWidget extends StatelessWidget {
   final VoidCallback onRefresh;
-  final VoidCallback onMyProfile;
+  final VoidCallback onMyprofile;
   final VoidCallback onLogout;
 
   const ThreeDotMenuWidget({
     super.key,
     required this.onRefresh,
-    required this.onMyProfile,
+    required this.onMyprofile,
     required this.onLogout,
   });
 
@@ -25,7 +26,7 @@ class ThreeDotMenuWidget extends StatelessWidget {
         if (value == 'refresh') {
           onRefresh();
         } else if (value == 'my_profile') {
-          onMyProfile();
+          onMyprofile();
         } else if (value == 'login') {
           Navigator.push(
             context,
@@ -36,7 +37,7 @@ class ThreeDotMenuWidget extends StatelessWidget {
         } else if (value == 'admin_panel') {
           Navigator.push(
             context,
-            MaterialPageRoute(builder: (context) => const AdminPannelScreen()),
+            MaterialPageRoute(builder: (context) => AdminPannelScreen()),
           );
         }
       },
@@ -63,7 +64,7 @@ class ThreeDotMenuWidget extends StatelessWidget {
                 children: [
                   Icon(Icons.person_outline, size: 20, color: Colors.blueAccent),
                   SizedBox(width: 10),
-                  Text('My Profile'),
+                  Text('My profile'),
                 ],
               ),
             ),

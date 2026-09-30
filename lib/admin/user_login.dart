@@ -357,7 +357,7 @@ class _UserLoginScreenState extends State<UserLoginScreen> {
     );
   }
 
-  // Reusable Form Field helper matching ProfileCreateScreen style
+  // Reusable Form Field helper matching profileCreateScreen style
   Widget _buildField(
       String label,
       TextEditingController controller, {

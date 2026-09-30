@@ -1,10 +1,10 @@
 import 'dart:io';
-import 'package:doctor_profile/image/cloudinary_service.dart';
+import 'package:pharmacist_profile/image/cloudinary_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'emogi.dart'; // Make sure this points to your emoji picker widget file
-import 'image.dart'; // Make sure this points to your image picker file
+import 'image_reels.dart'; // Ensure this points to your image/video source picker utility
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 
@@ -22,18 +22,32 @@ class _EditPostScreenState extends State<EditPostScreen> {
   final _supabase = Supabase.instance.client;
   bool _isUpdating = false;
 
-  // Facebook features and media variables
-  String _audience = "Public"; // Can also be loaded if your post table stores audience settings
-  File? _selectedNewImageFile; // For a newly picked image
-  String? _existingImageUrl;   // For an image that was already saved on the post
+  // Media and Audience variables
+  String _audience = "Public";
+  File? _selectedNewImageFile;
+  File? _selectedNewVideoFile;
+  String? _existingImageUrl;
+  bool _isVideo = false;
+
+  // Author Profile Data
+  Map<String, dynamic>? _authorProfile;
+  bool _isLoadingProfile = true;
+
   final CloudinaryService _cloudinaryService = CloudinaryService();
 
   @override
   void initState() {
     super.initState();
-    // Pre-fill fields with existing post data
     _contentController = TextEditingController(text: widget.post['content'] ?? '');
-    _existingImageUrl = widget.post['image_url'];
+
+    // Check existing media configuration
+    _existingImageUrl = widget.post['media_url'] ?? widget.post['image_url'] ?? widget.post['video_url'];
+    if (_existingImageUrl != null && _existingImageUrl!.isNotEmpty) {
+      final ext = _existingImageUrl!.split('?').first.toLowerCase();
+      _isVideo = ext.endsWith('.mp4') || ext.endsWith('.mov') || ext.endsWith('.avi') || ext.endsWith('.mkv');
+    }
+
+    _fetchAuthorProfile();
   }
 
   @override
@@ -42,47 +56,81 @@ class _EditPostScreenState extends State<EditPostScreen> {
     super.dispose();
   }
 
-  Future<File?> compressImageToTargetSize(File file, {int targetKb = 50}) async {
-    final targetBytes = targetKb * 1024;
+  Future<void> _fetchAuthorProfile() async {
+    try {
+      final userId = widget.post['user_id'];
+      if (userId == null) {
+        setState(() => _isLoadingProfile = false);
+        return;
+      }
 
-    // If the original file is already smaller than the target, return it directly
-    if (await file.length() <= targetBytes) {
+      // Fetch profile from 'pcb' table by id or user_id
+      final response = await _supabase
+          .from('pcb')
+          .select()
+          .or('id.eq.$userId,user_id.eq.$userId')
+          .maybeSingle();
+
+      if (mounted) {
+        setState(() {
+          _authorProfile = response;
+          _isLoadingProfile = false;
+        });
+      }
+    } catch (e) {
+      debugPrint("Error fetching author profile: $e");
+      if (mounted) {
+        setState(() => _isLoadingProfile = false);
+      }
+    }
+  }
+
+  Future<File?> compressImageToTargetSize(File file, {int targetKb = 50}) async {
+    try {
+      final targetBytes = targetKb * 1024;
+      if (await file.length() <= targetBytes) return file;
+
+      final dir = await getTemporaryDirectory();
+      final targetPath = path.join(dir.path, '${DateTime.now().millisecondsSinceEpoch}_compressed.jpg');
+
+      int quality = 90;
+      XFile? result;
+
+      while (quality > 10) {
+        result = await FlutterImageCompress.compressAndGetFile(
+          file.absolute.path,
+          targetPath,
+          quality: quality,
+          minWidth: 1024,
+          minHeight: 1024,
+          format: CompressFormat.jpeg,
+        );
+
+        if (result != null) {
+          final compressedFile = File(result.path);
+          if (await compressedFile.length() <= targetBytes) {
+            return compressedFile;
+          }
+        }
+        quality -= 15;
+      }
+
+      return result != null ? File(result.path) : file;
+    } catch (e) {
+      debugPrint("Compression error: $e");
       return file;
     }
-
-    final dir = await getTemporaryDirectory();
-    final targetPath = path.join(dir.path, '${DateTime.now().millisecondsSinceEpoch}_compressed.jpg');
-
-    int quality = 90;
-    File? resultFile;
-
-    // Iteratively reduce quality until we reach around 50kb or quality drops too low
-    while (quality > 10) {
-      var result = await FlutterImageCompress.compressAndGetFile(
-        file.absolute.path,
-        targetPath,
-        quality: quality,
-        minWidth: 800, // Optional: Resize bounds to lower file size further
-        minHeight: 800,
-        format: CompressFormat.jpeg,
-      );
-
-      if (result != null) {
-        resultFile = File(result.path);
-        int size = await resultFile.length();
-        if (size <= targetBytes) {
-          break; // Reached target size
-        }
-      }
-      quality -= 15; // Step down quality
-    }
-
-    return resultFile ?? file;
   }
 
   Future<void> _updatePost() async {
     final updatedContent = _contentController.text.trim();
-    if (updatedContent.isEmpty && _selectedNewImageFile == null && (_existingImageUrl == null || _existingImageUrl!.isEmpty)) {
+    if (updatedContent.isEmpty &&
+        _selectedNewImageFile == null &&
+        _selectedNewVideoFile == null &&
+        (_existingImageUrl == null || _existingImageUrl!.isEmpty)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Post content or media cannot be entirely empty.")),
+      );
       return;
     }
 
@@ -90,42 +138,62 @@ class _EditPostScreenState extends State<EditPostScreen> {
 
     try {
       final postId = widget.post['id'];
-      String? finalImageUrl = _existingImageUrl;
-      final String? oldImageUrl = widget.post['image_url'];
+      String? finalMediaUrl = _existingImageUrl;
 
-      // 2. Handle Image Changes
-      if (_selectedNewImageFile != null) {
-        // Compress the image down to ~50kb before uploading
-        File? compressedFile = await compressImageToTargetSize(_selectedNewImageFile!, targetKb: 50);
+      // Look up old media URL across all possible fields
+      final String? oldMediaUrl = widget.post['media_url'] ?? widget.post['image_url'] ?? widget.post['video_url'];
 
-        // Upload the newly selected (and compressed) image to Cloudinary
-        finalImageUrl = await _cloudinaryService.uploadImage(compressedFile ?? _selectedNewImageFile!);
-        if (finalImageUrl == null) {
-          throw Exception("Failed to upload new image to Cloudinary.");
+      // Helper function to safely trigger deletion handling video/image resource types
+      Future<void> deleteOldMedia(String url) async {
+        try {
+          // If your CloudinaryService handles videos/images internally via URL:
+          await _cloudinaryService.deleteMedia(url);
+        } catch (e) {
+          debugPrint("Error deleting old media from Cloudinary: $e");
         }
-
-        // Optional: Delete the old image from Cloudinary if it existed
-        if (oldImageUrl != null && oldImageUrl.isNotEmpty) {
-          await _cloudinaryService.deleteOldImage(oldImageUrl);
-        }
-      } else if (_existingImageUrl == null && oldImageUrl != null && oldImageUrl.isNotEmpty) {
-        // User explicitly removed the image during edit
-        await _cloudinaryService.deleteOldImage(oldImageUrl);
-        finalImageUrl = null;
       }
 
-      // 3. Update the post row in Supabase
+      // Handle New Image Upload
+      if (_selectedNewImageFile != null) {
+        File? compressedFile = await compressImageToTargetSize(_selectedNewImageFile!, targetKb: 100);
+        finalMediaUrl = await _cloudinaryService.uploadImage(compressedFile ?? _selectedNewImageFile!);
+
+        if (finalMediaUrl == null) throw Exception("Failed to upload new image.");
+
+        if (oldMediaUrl != null && oldMediaUrl.isNotEmpty) {
+          await deleteOldMedia(oldMediaUrl);
+        }
+      }
+      // Handle New Video Upload
+      else if (_selectedNewVideoFile != null) {
+        // NOTE: Make sure your CloudinaryService supports video uploads (e.g., uploadVideo or generic upload)
+        finalMediaUrl = await _cloudinaryService.uploadImage(_selectedNewVideoFile!);
+        if (finalMediaUrl == null) throw Exception("Failed to upload new video.");
+
+        if (oldMediaUrl != null && oldMediaUrl.isNotEmpty) {
+          await deleteOldMedia(oldMediaUrl);
+        }
+      }
+      // If user explicitly removed media (clicked the 'X' button on the preview)
+      else if (_existingImageUrl == null && oldMediaUrl != null && oldMediaUrl.isNotEmpty) {
+        await deleteOldMedia(oldMediaUrl);
+        finalMediaUrl = null;
+      }
+
+      // Update Database Row
       await _supabase
           .from('pcb_posts')
           .update({
         'content': updatedContent,
-        'image_url': finalImageUrl,
+        'image_url': finalMediaUrl,
+        'media_url': finalMediaUrl,
+        'video_url': _isVideo ? finalMediaUrl : null, // Ensure video_url column syncs if applicable
         'updated_at': DateTime.now().toIso8601String(),
       })
           .eq('id', postId);
 
       if (mounted) {
-        Navigator.pop(context, true); // Return true to trigger news feed refresh
+        Navigator.pop(context, true);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text("Post updated successfully!"),
@@ -158,10 +226,7 @@ class _EditPostScreenState extends State<EditPostScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              "Select Audience",
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
+            const Text("Select Audience", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 10),
             ListTile(
               leading: const Icon(Icons.public, color: Colors.blueAccent),
@@ -189,7 +254,8 @@ class _EditPostScreenState extends State<EditPostScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final profile = widget.post['pcb'] ?? {};
+    // Fallback profile details if fetched data or widget map has properties
+    final profile = _authorProfile ?? widget.post['pcb'] ?? {};
     final displayName = profile['name'] ?? 'User';
     final userImage = profile['image_url'];
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
@@ -216,9 +282,7 @@ class _EditPostScreenState extends State<EditPostScreen> {
                 backgroundColor: Colors.blueAccent,
                 foregroundColor: Colors.white,
                 elevation: 0,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               ),
               onPressed: _isUpdating ? null : _updatePost,
               child: _isUpdating
@@ -233,7 +297,6 @@ class _EditPostScreenState extends State<EditPostScreen> {
         ],
       ),
       body: SafeArea(
-        bottom: true,
         child: Column(
           children: [
             Expanded(
@@ -242,7 +305,6 @@ class _EditPostScreenState extends State<EditPostScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // --- USER INFO & AUDIENCE DROPLET ---
                     Row(
                       children: [
                         CircleAvatar(
@@ -262,9 +324,18 @@ class _EditPostScreenState extends State<EditPostScreen> {
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              displayName,
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                            Row(
+                              children: [
+                                Text(displayName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                                if (_isLoadingProfile) ...[
+                                  const SizedBox(width: 8),
+                                  const SizedBox(
+                                    width: 12,
+                                    height: 12,
+                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                  ),
+                                ],
+                              ],
                             ),
                             const SizedBox(height: 2),
                             InkWell(
@@ -279,16 +350,9 @@ class _EditPostScreenState extends State<EditPostScreen> {
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Icon(
-                                      _audience == "Public" ? Icons.public : Icons.group,
-                                      size: 12,
-                                      color: Colors.black54,
-                                    ),
+                                    Icon(_audience == "Public" ? Icons.public : Icons.group, size: 12, color: Colors.black54),
                                     const SizedBox(width: 4),
-                                    Text(
-                                      _audience,
-                                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: Colors.black87),
-                                    ),
+                                    Text(_audience, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: Colors.black87)),
                                     const SizedBox(width: 2),
                                     const Icon(Icons.arrow_drop_down, size: 14, color: Colors.black54),
                                   ],
@@ -301,7 +365,6 @@ class _EditPostScreenState extends State<EditPostScreen> {
                     ),
                     const SizedBox(height: 20),
 
-                    // --- TEXT INPUT FIELD ---
                     TextField(
                       controller: _contentController,
                       maxLines: null,
@@ -315,19 +378,14 @@ class _EditPostScreenState extends State<EditPostScreen> {
                       style: const TextStyle(fontSize: 16, color: Colors.black87),
                     ),
 
-                    // --- MEDIA PREVIEW BOX (NEWLY PICKED OR EXISTING IMAGE) ---
+                    // --- MEDIA PREVIEW BOX ---
                     if (_selectedNewImageFile != null) ...[
                       const SizedBox(height: 15),
                       Stack(
                         children: [
                           ClipRRect(
                             borderRadius: BorderRadius.circular(12),
-                            child: Image.file(
-                              _selectedNewImageFile!,
-                              height: 200,
-                              width: double.infinity,
-                              fit: BoxFit.cover,
-                            ),
+                            child: Image.file(_selectedNewImageFile!, height: 200, width: double.infinity, fit: BoxFit.cover),
                           ),
                           Positioned(
                             right: 8,
@@ -343,18 +401,44 @@ class _EditPostScreenState extends State<EditPostScreen> {
                           ),
                         ],
                       ),
+                    ] else if (_selectedNewVideoFile != null) ...[
+                      const SizedBox(height: 15),
+                      Stack(
+                        children: [
+                          Container(
+                            height: 200,
+                            width: double.infinity,
+                            decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(12)),
+                            child: const Center(child: Icon(Icons.videocam, size: 50, color: Colors.white)),
+                          ),
+                          Positioned(
+                            right: 8,
+                            top: 8,
+                            child: CircleAvatar(
+                              backgroundColor: Colors.black54,
+                              radius: 16,
+                              child: IconButton(
+                                icon: const Icon(Icons.close, size: 16, color: Colors.white),
+                                onPressed: () => setState(() => _selectedNewVideoFile = null),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ] else if (_existingImageUrl != null && _existingImageUrl!.isNotEmpty) ...[
                       const SizedBox(height: 15),
                       Stack(
                         children: [
                           ClipRRect(
                             borderRadius: BorderRadius.circular(12),
-                            child: Image.network(
-                              _existingImageUrl!,
+                            child: _isVideo
+                                ? Container(
                               height: 200,
                               width: double.infinity,
-                              fit: BoxFit.cover,
-                            ),
+                              color: Colors.black,
+                              child: const Center(child: Icon(Icons.play_circle_fill, size: 60, color: Colors.white)),
+                            )
+                                : Image.network(_existingImageUrl!, height: 200, width: double.infinity, fit: BoxFit.cover),
                           ),
                           Positioned(
                             right: 8,
@@ -376,24 +460,13 @@ class _EditPostScreenState extends State<EditPostScreen> {
               ),
             ),
 
-            // --- FACEBOOK-STYLE BOTTOM TOOLBAR ---
+            // --- TOOLBAR ---
             Container(
-              padding: EdgeInsets.only(
-                left: 16,
-                right: 16,
-                top: 10,
-                bottom: bottomInset > 0 ? 10 : 10,
-              ),
+              padding: EdgeInsets.only(left: 16, right: 16, top: 10, bottom: bottomInset > 0 ? 10 : 10),
               decoration: BoxDecoration(
                 color: Colors.white,
                 border: Border(top: BorderSide(color: Colors.grey.shade200)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.03),
-                    offset: const Offset(0, -2),
-                    blurRadius: 4,
-                  ),
-                ],
+                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), offset: const Offset(0, -2), blurRadius: 4)],
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -410,18 +483,19 @@ class _EditPostScreenState extends State<EditPostScreen> {
                             onImageSelected: (file) {
                               setState(() {
                                 _selectedNewImageFile = file;
-                                _existingImageUrl = null; // Override existing image with new selection
+                                _selectedNewVideoFile = null;
+                                _existingImageUrl = null;
+                                _isVideo = false;
                               });
                             },
-                          );
-                        },
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.person_add, color: Colors.blue),
-                        tooltip: "Tag People",
-                        onPressed: () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text("Tagging feature coming soon!")),
+                            onVideoSelected: (file) {
+                              setState(() {
+                                _selectedNewVideoFile = file;
+                                _selectedNewImageFile = null;
+                                _existingImageUrl = null;
+                                _isVideo = true;
+                              });
+                            },
                           );
                         },
                       ),

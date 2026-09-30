@@ -1,5 +1,6 @@
-import 'package:doctor_profile/admin/announcement_marque.dart';
-import 'package:doctor_profile/admin/featured_specialist_screen.dart';
+import 'package:pharmacist_profile/admin/admin_control_user.dart';
+import 'package:pharmacist_profile/admin/announcement_marque.dart';
+import 'package:pharmacist_profile/admin/featured_specialist_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -122,6 +123,20 @@ class _AdminPannelScreenState extends State<AdminPannelScreen> {
                   Navigator.push(
                     context,
                     MaterialPageRoute(builder: (context) => const AdminFeaturedSpecialistsScreen()),
+                  );
+                },
+              ),
+              // Option 3: User Management / Control Card
+              _buildMenuCard(
+                context,
+                title: "Manage Users",
+                subtitle: "View, edit, hold, or delete registered user accounts",
+                icon: Icons.manage_accounts,
+                iconColor: Colors.green,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const AdminControlUserScreen()),
                   );
                 },
               ),

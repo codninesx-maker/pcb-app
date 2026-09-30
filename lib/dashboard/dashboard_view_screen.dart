@@ -1,20 +1,19 @@
 import 'dart:async';
-import 'package:doctor_profile/admin/DashboardAnnouncementBanner.dart';
-import 'package:doctor_profile/admin/admin_pannel.dart';
-import 'package:doctor_profile/admin/user_login.dart';
-import 'package:doctor_profile/dashboard/all_professionals_list.dart';
-import 'package:doctor_profile/dashboard/community_news_feed.dart';
-import 'package:doctor_profile/dashboard/featured_profile.dart';
-import 'package:doctor_profile/dashboard/post/create_post_screen.dart';
-import 'package:doctor_profile/dashboard/search_bar.dart';
-import 'package:doctor_profile/dashboard/three_dot_menu.dart';
-import 'package:doctor_profile/image/cloudinary_service.dart';
-import 'package:doctor_profile/profile/profile-create_screen.dart';
-import 'package:doctor_profile/profile/view_profile_detail_screen.dart';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
+import 'package:pharmacist_profile/admin/DashboardAnnouncementBanner.dart';
+import 'package:pharmacist_profile/dashboard/create_post_news_feed.dart';
+import 'package:pharmacist_profile/dashboard/featured_profile.dart';
+import 'package:pharmacist_profile/dashboard/post/create_post_screen.dart';
+import 'package:pharmacist_profile/dashboard/profile_list_five_connected_dash.dart';
+import 'package:pharmacist_profile/dashboard/search_bar.dart';
+import 'package:pharmacist_profile/dashboard/three_dot_menu.dart';
+import 'package:pharmacist_profile/profile/profile-create_screen.dart';
+import 'package:pharmacist_profile/profile/view_profile_detail_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../image/cloudinary_service.dart';
 import 'chat_screen.dart';
 
 
@@ -31,7 +30,7 @@ class _DashboardViewScreenState extends State<DashboardViewScreen> {
 
   late final StreamSubscription<AuthState> _authSubscription;
 
-  Future<List<Map<String, dynamic>>> _doctorsFuture = Future.value([]);
+  Future<List<Map<String, dynamic>>> _profileFuture = Future.value([]);
   Future<List<Map<String, dynamic>>> _postsFuture = Future.value([]);
   final _searchController = TextEditingController();
   final _supabase = Supabase.instance.client;
@@ -73,24 +72,52 @@ class _DashboardViewScreenState extends State<DashboardViewScreen> {
   }
 
   void _setupPostsRealtime() {
-    _postsChannel = _supabase
-        .channel('public:pcb_posts')
-        .onPostgresChanges(
-      event: PostgresChangeEvent.all,
-      schema: 'public',
-      table: 'pcb_posts',
-      callback: (payload) {
-        final currentUserId = _supabase.auth.currentUser?.id;
-        final newData = payload.newRecord;
-        final String likedByString = newData['liked_by']?.toString() ?? '';
+    // Check session before subscribing
+    final session = _supabase.auth.currentSession;
+    if (session == null || session.isExpired) {
+      _supabase.auth.refreshSession().then((_) {
+        _subscribeToPostsChannel();
+      }).catchError((e) {
+        debugPrint("Failed to refresh session for realtime: $e");
+      });
+    } else {
+      _subscribeToPostsChannel();
+    }
+  }
 
-        if (currentUserId != null && likedByString.contains(currentUserId)) {
-          return;
+  void _subscribeToPostsChannel() {
+    try {
+      _postsChannel = _supabase
+          .channel('public:pcb_posts')
+          .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public',
+        table: 'pcb_posts',
+        callback: (payload) {
+          if (payload.eventType == PostgresChangeEvent.update) {
+            final currentUserId = _supabase.auth.currentUser?.id;
+            final newData = payload.newRecord;
+            final String likedByString = newData['liked_by']?.toString() ?? '';
+
+            if (currentUserId != null && likedByString.contains(currentUserId)) {
+              return;
+            }
+          }
+          _fetchPosts();
+        },
+      )
+          .subscribe((status, error) {
+        if (status == RealtimeSubscribeStatus.channelError) {
+          debugPrint("Realtime channel error: $error");
+          // Attempt session refresh if token expired
+          if (error.toString().contains('Token has expired')) {
+            _supabase.auth.refreshSession();
+          }
         }
-        _fetchPosts();
-      },
-    )
-        .subscribe();
+      });
+    } catch (e) {
+      debugPrint("Error setting up posts realtime: $e");
+    }
   }
 
   void _listenToAnnouncements() {
@@ -174,7 +201,7 @@ class _DashboardViewScreenState extends State<DashboardViewScreen> {
 
     await Future.wait([
       _fetchUserData(currentUser),
-      _fetchProfile(),
+      _fetchprofile(),
       _fetchPosts(),
     ]);
   }
@@ -198,19 +225,22 @@ class _DashboardViewScreenState extends State<DashboardViewScreen> {
       final data = await Supabase.instance.client
           .from('pcb_posts')
           .select('''
-          id,
-          content,
-          image_url,
-          created_at,
-          user_id,
-          likes_count,
-          comments_count,
-          shares_count,
-          liked_by,
-          pcb:user_id (name, image_url)
-        ''')
+            id,
+            content,
+            image_url,
+            video_url,
+            media_type,
+            media_url,
+            created_at,
+            user_id,
+            likes_count,
+            comments_count,
+            shares_count,
+            liked_by,
+            pcb!pcb_posts_user_id_fkey (name, image_url)
+          ''')
           .order('created_at', ascending: false)
-          .limit(10);
+          .limit(05);
 
       final List<Map<String, dynamic>> processedPosts = data.map((post) {
         final Map<String, dynamic> mutablePost = Map<String, dynamic>.from(post);
@@ -237,7 +267,7 @@ class _DashboardViewScreenState extends State<DashboardViewScreen> {
     }
   }
 
-  Future<void> _fetchProfile() async {
+  Future<void> _fetchprofile() async {
     try {
       final data = await Supabase.instance.client
           .from('pcb')
@@ -247,7 +277,7 @@ class _DashboardViewScreenState extends State<DashboardViewScreen> {
 
       if (mounted) {
         setState(() {
-          _doctorsFuture = Future.value(data);
+          _profileFuture = Future.value(data);
         });
       }
     } catch (e) {
@@ -255,26 +285,26 @@ class _DashboardViewScreenState extends State<DashboardViewScreen> {
     }
   }
 
-  Future<void> _deleteProfile(String doctorId) async {
+  Future<void> _deleteprofile(String profileId) async {
     try {
       final existingData = await Supabase.instance.client
           .from('pcb')
           .select('image_url, cover_url')
-          .eq('id', doctorId)
+          .eq('id', profileId)
           .maybeSingle();
 
       if (existingData != null) {
         final String? imageUrl = existingData['image_url'];
         if (imageUrl != null && imageUrl.isNotEmpty) {
           try {
-            await _cloudinary.deleteOldImage(imageUrl);
+            await _cloudinary.deleteMedia(imageUrl);
           } catch (_) {}
         }
 
         final String? coverUrl = existingData['cover_url'];
         if (coverUrl != null && coverUrl.isNotEmpty) {
           try {
-            await _cloudinary.deleteOldImage(coverUrl);
+            await _cloudinary.deleteMedia(coverUrl);
           } catch (_) {}
         }
       }
@@ -282,22 +312,22 @@ class _DashboardViewScreenState extends State<DashboardViewScreen> {
       await Supabase.instance.client
           .from('pcb')
           .delete()
-          .eq('id', doctorId);
+          .eq('id', profileId);
 
       if (mounted) {
-        _fetchProfile();
+        _fetchprofile();
       }
     } catch (e) {
       debugPrint("Delete Error: $e");
     }
   }
 
-  Future<void> _showDeleteConfirmation(Map<String, dynamic> doctor) async {
+  Future<void> _showDeleteConfirmation(Map<String, dynamic> profile) async {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text("Delete Professional"),
-        content: Text("Are you sure you want to delete ${doctor['name']}? This action cannot be undone."),
+        content: Text("Are you sure you want to delete ${profile['name']}? This action cannot be undone."),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -307,8 +337,8 @@ class _DashboardViewScreenState extends State<DashboardViewScreen> {
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () {
               Navigator.pop(context);
-              final String doctorId = doctor['id']?.toString() ?? "";
-              _deleteProfile(doctorId);
+              final String profileId = profile['id']?.toString() ?? "";
+              _deleteprofile(profileId);
             },
             child: const Text("Delete", style: TextStyle(color: Colors.white)),
           ),
@@ -336,7 +366,7 @@ class _DashboardViewScreenState extends State<DashboardViewScreen> {
           _avatarUrl = null;
         });
 
-        _fetchProfile();
+        _fetchprofile();
         _fetchPosts();
 
         ScaffoldMessenger.of(context).showSnackBar(
@@ -353,7 +383,7 @@ class _DashboardViewScreenState extends State<DashboardViewScreen> {
     }
   }
 
-  Future<void> _navigateToMyProfile() async {
+  Future<void> _navigateToMyprofile() async {
     final currentUser = _supabase.auth.currentUser;
     if (currentUser == null) return;
 
@@ -376,13 +406,13 @@ class _DashboardViewScreenState extends State<DashboardViewScreen> {
           await Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (context) => ProfileDetailScreen(doctor: profileData),
+              builder: (context) => profileDetailScreen(profile: profileData), // Changed from profile: to profiles:
             ),
           );
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text("You haven't created a professional profile yet! Tap '+' to create one."),
+              content: Text("You haven't created a professional profile yet! Login or Tap '+' to create one."),
               backgroundColor: Colors.orange,
             ),
           );
@@ -398,7 +428,7 @@ class _DashboardViewScreenState extends State<DashboardViewScreen> {
     }
   }
 
-  Future<void> _navigateToAuthorProfile(String? userId) async {
+  Future<void> _navigateToAuthorprofile(String? userId) async {
     if (userId == null) return;
 
     showDialog(
@@ -408,7 +438,7 @@ class _DashboardViewScreenState extends State<DashboardViewScreen> {
     );
 
     try {
-      final fullProfile = await _supabase
+      final fullprofile = await _supabase
           .from('pcb')
           .select()
           .eq('user_id', userId)
@@ -416,14 +446,14 @@ class _DashboardViewScreenState extends State<DashboardViewScreen> {
 
       if (context.mounted) {
         Navigator.pop(context);
-        if (fullProfile != null) {
+        if (fullprofile != null) {
           await Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (context) => ProfileDetailScreen(doctor: fullProfile),
+              builder: (context) => profileDetailScreen(profile: fullprofile),
             ),
           );
-          _fetchProfile();
+          _fetchprofile();
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text("This user hasn't created a professional profile yet.")),
@@ -445,7 +475,7 @@ class _DashboardViewScreenState extends State<DashboardViewScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text("Delete Post"),
-        content: const Text("Are you sure you want to delete this post? This action cannot be undone."),
+        content: const Text("Are you sure you want to delete this post and all associated media? This action cannot be undone."),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -461,24 +491,75 @@ class _DashboardViewScreenState extends State<DashboardViewScreen> {
 
     if (confirmed == true) {
       try {
+        // Show loading indicator
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => const Center(child: CircularProgressIndicator.adaptive()),
+        );
+
+        // 1. Fetch post data first to get any media URLs
+        final postData = await Supabase.instance.client
+            .from('pcb_posts')
+            .select('image_url, video_url, media_url')
+            .eq('id', postId)
+            .maybeSingle();
+
+        if (postData != null) {
+          final String? imageUrl = postData['image_url'];
+          final String? videoUrl = postData['video_url'];
+          final String? mediaUrl = postData['media_url'];
+
+          // Use a Set to keep track of unique URLs so we don't delete the same file twice
+          final Set<String> urlsToDelete = {};
+
+          if (imageUrl != null && imageUrl.isNotEmpty) urlsToDelete.add(imageUrl);
+          if (videoUrl != null && videoUrl.isNotEmpty) urlsToDelete.add(videoUrl);
+          if (mediaUrl != null && mediaUrl.isNotEmpty) urlsToDelete.add(mediaUrl);
+
+          // 2. Delete unique media files safely from Cloudinary
+          for (final url in urlsToDelete) {
+            try {
+              await _cloudinary.deleteMedia(url);
+            } catch (e) {
+              debugPrint("Cloudinary Media Delete Error for $url: $e");
+            }
+          }
+        }
+
+        // 3. Delete related records first (if foreign keys aren't set to cascade)
+        try {
+          await Supabase.instance.client
+              .from('pcb_post_comments')
+              .delete()
+              .eq('post_id', postId);
+        } catch (e) {
+          debugPrint("Comments Delete Error: $e");
+        }
+
+        // 4. Delete the main post row from Supabase
         await Supabase.instance.client
             .from('pcb_posts')
             .delete()
             .eq('id', postId);
 
         if (mounted) {
+          Navigator.pop(context); // Pop loading dialog
+
+          // Refresh state
+          await _fetchPosts();
+
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text("Post deleted successfully"),
+              content: Text("Post and associated media deleted successfully"),
               backgroundColor: Colors.green,
             ),
           );
-          setState(() {
-            _fetchPosts();
-          });
         }
       } catch (e) {
         if (mounted) {
+          Navigator.pop(context); // Pop loading dialog
+          debugPrint("Complete Post Deletion Error: $e");
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text("Error deleting post: $e"),
@@ -502,16 +583,16 @@ class _DashboardViewScreenState extends State<DashboardViewScreen> {
         onPressed: () async {
           await Navigator.push(
             context,
-            MaterialPageRoute(builder: (context) => const ProfileCreateScreen()),
+            MaterialPageRoute(builder: (context) => const profileCreateScreen()),
           );
-          _fetchProfile();
+          _fetchprofile();
         },
         backgroundColor: Colors.blueAccent,
         child: const Icon(Icons.add, color: Colors.white),
       ),
       body: SafeArea(
         child: RefreshIndicator(
-          onRefresh: _fetchProfile,
+          onRefresh: _fetchprofile,
           child: SingleChildScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
@@ -525,17 +606,7 @@ class _DashboardViewScreenState extends State<DashboardViewScreen> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     GestureDetector(
-                      onTap: () {
-                        setState(() {
-                          _tapCount++;
-                          if (_tapCount == 5) {
-                            _isAdminMode = true;
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text("Admin Mode Activated!")),
-                            );
-                          }
-                        });
-                      },
+
                       child: const Text(
                         "PCB",
                         style: TextStyle(fontSize: 20, color: Colors.blueAccent, fontWeight: FontWeight.bold),
@@ -572,8 +643,8 @@ class _DashboardViewScreenState extends State<DashboardViewScreen> {
                           icon: const Text("😊", style: TextStyle(fontSize: 24)),
                         ),
                         ThreeDotMenuWidget(
-                          onRefresh: () => _fetchProfile(),
-                          onMyProfile: () => _navigateToMyProfile(),
+                          onRefresh: () => _fetchprofile(),
+                          onMyprofile: () => _navigateToMyprofile(),
                           onLogout: () => _handleLogout(),
                         ),
                       ],
@@ -593,17 +664,17 @@ class _DashboardViewScreenState extends State<DashboardViewScreen> {
                 DashboardAnnouncementBanner(announcementText: _announcementText),
 
                 // --- FEATURED SECTION ---
-                FeaturedProfilesSection(
-                  doctorsFuture: _doctorsFuture,
-                  onProfileReturned: () => _fetchProfile(),
+                FeaturedprofilesSection(
+                  profileFuture: _profileFuture,
+                  onprofileReturned: () => _fetchprofile(),
                 ),
 
                 // --- ALL PROFESSIONALS LIST ---
                 AllProfessionalsListSection(
-                  doctorsFuture: _doctorsFuture,
+                  profileFuture: _profileFuture,
                   searchQuery: _searchQuery,
-                  onProfileReturned: () => _fetchProfile(),
-                  onDeleteRequested: (doctor) => _showDeleteConfirmation(doctor),
+                  onprofileReturned: () => _fetchprofile(),
+                  onDeleteRequested: (profile) => _showDeleteConfirmation(profile),
                 ),
 
                 // --- COMMUNITY POSTS FEED SECTION ---
@@ -619,7 +690,7 @@ class _DashboardViewScreenState extends State<DashboardViewScreen> {
                     }
                   },
                   onPostsRefreshed: () => _fetchPosts(),
-                  onNavigateToAuthorProfile: (userId) => _navigateToAuthorProfile(userId),
+                  onNavigateToAuthorprofile: (userId) => _navigateToAuthorprofile(userId),
                   onShowImagePreview: (imageUrl) => _showImagePreview(context, imageUrl),
                   onConfirmDeletePost: (postId) => _confirmDeletePost(postId),
                 ),

@@ -74,8 +74,8 @@
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
-   <ProfileAction
-      buildConfiguration = "Profile"
+   <profileAction
+      buildConfiguration = "profile"
       shouldUseLaunchSchemeArgsEnv = "YES"
       savedToolIdentifier = ""
       useCustomWorkingDirectory = "NO"
@@ -90,7 +90,7 @@
             ReferencedContainer = "container:Runner.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
-   </ProfileAction>
+   </profileAction>
    <AnalyzeAction
       buildConfiguration = "Debug">
    </AnalyzeAction>
