@@ -21,7 +21,6 @@
   <link rel="manifest" href="manifest.json">
 
   <!-- Smart Deep Link & Play Store Redirection Script -->
-  <!-- Smart Deep Link & Play Store Redirection Script -->
   <script>
     window.addEventListener('DOMContentLoaded', (event) => {
       const hash = window.location.hash;
@@ -29,11 +28,11 @@
       // Check if user is on mobile and clicking a post deep link
       if (hash.includes('/post/') && /Android/i.test(navigator.userAgent)) {
         const postId = hash.split('/post/')[1];
-        const packageName = 'com.rxai.pcb'; // Your exact package ID
+        const packageName = 'com.rxai.pcb';
         const playStoreUrl = `https://play.google.com/store/apps/details?id=${packageName}`;
 
-        // Use %23 instead of # for the hash routing so Chrome parses it correctly
-        const intentUrl = `intent://codninesx-maker.github.io/pcb-app/%23/post/${postId}#Intent;scheme=https;package=${packageName};S.browser_fallback_url=${encodeURIComponent(playStoreUrl)};end;`;
+        // Use custom scheme 'pcb' to bypass domain verification errors
+        const intentUrl = `intent://post/${postId}#Intent;scheme=pcb;package=${packageName};S.browser_fallback_url=${encodeURIComponent(playStoreUrl)};end;`;
 
         window.location.replace(intentUrl);
       }
