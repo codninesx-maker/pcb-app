@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_linkify/flutter_linkify.dart';
 import 'package:pharmacist_profile/dashboard/post/Like_reaction_button_likefb.dart';
 import 'package:pharmacist_profile/dashboard/post/comments_bottom_sheet.dart';
+import 'package:pharmacist_profile/profile/view_profile_detail_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class Likecommentshare extends StatefulWidget {
   final Map<String, dynamic> post;
@@ -102,72 +105,148 @@ class _LikecommentshareState extends State<Likecommentshare> with AutomaticKeepA
           mainAxisSize: MainAxisSize.min,
           children: [
             // --- 1. POST HEADER ---
-            Row(
-              children: [
-                CircleAvatar(
-                  radius: 20,
-                  backgroundImage: post['user_avatar'] != null
-                      ? NetworkImage(post['user_avatar'])
-                      : null,
-                  child: post['user_avatar'] == null
-                      ? const Icon(Icons.person)
-                      : null,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    post['user_name'] ?? 'User',
-                    style: const TextStyle(
-                        fontWeight: FontWeight.bold, fontSize: 15),
+            // --- 1. POST HEADER ---
+            GestureDetector(
+              onTap: () async {
+                final String? authorUserId = post['user_id'];
+                if (authorUserId == null || authorUserId.isEmpty) return;
+
+                // Show loading indicator while fetching author's profile
+                showDialog(
+                  context: context,
+                  barrierDismissible: false,
+                  builder: (context) => const Center(child: CircularProgressIndicator.adaptive()),
+                );
+
+                try {
+                  // Query the 'pcb' table for this specific user's profile
+                  final profileData = await Supabase.instance.client
+                      .from('pcb')
+                      .select()
+                      .eq('user_id', authorUserId)
+                      .maybeSingle();
+
+                  if (!context.mounted) return;
+                  Navigator.pop(context); // Dismiss loading dialog
+
+                  if (profileData != null) {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => profileDetailScreen(profile: profileData),
+                      ),
+                    );
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text("This user hasn't created a professional profile yet.")),
+                    );
+                  }
+                } catch (e) {
+                  if (!context.mounted) return;
+                  Navigator.pop(context); // Dismiss loading dialog
+                  debugPrint("Error loading author profile: $e");
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text("Error loading profile: $e"), backgroundColor: Colors.red),
+                  );
+                }
+              },
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 20,
+                    backgroundImage: post['user_avatar'] != null
+                        ? NetworkImage(post['user_avatar'])
+                        : null,
+                    child: post['user_avatar'] == null
+                        ? const Icon(Icons.person)
+                        : null,
                   ),
-                ),
-              ],
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      post['user_name'] ?? 'User',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 15),
+                    ),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 10),
 
             // --- 2. POST CONTENT ---
-            if (post['content'] != null && post['content']
-                .toString()
-                .isNotEmpty) ...[
-              Text(
-                post['content'],
-                style: const TextStyle(fontSize: 14),
+            if (post['content'] != null && post['content'].toString().isNotEmpty) ...[
+              Linkify(
+                onOpen: (link) async {
+                  String urlString = link.url;
+                  if (!urlString.startsWith('http://') && !urlString.startsWith('https://')) {
+                    urlString = 'https://$urlString';
+                  }
+                  final Uri url = Uri.parse(urlString);
+                  try {
+                    if (await canLaunchUrl(url)) {
+                      await launchUrl(url, mode: LaunchMode.externalApplication);
+                    } else {
+                      debugPrint('Could not launch $urlString');
+                    }
+                  } catch (e) {
+                    debugPrint('Error launching link: $e');
+                  }
+                },
+                text: post['content'],
+                style: const TextStyle(
+                  fontSize: 14,
+                  color: Colors.black87,
+                  height: 1.4,
+                ),
+                linkStyle: const TextStyle(
+                  color: Colors.blueAccent,
+                  fontWeight: FontWeight.w600,
+                  decoration: TextDecoration.underline,
+                ),
               ),
               const SizedBox(height: 10),
             ],
 
             // --- 3. MEDIA RENDERING (IMAGE OR VIDEO) ---
             if (mediaUrl != null && mediaUrl.isNotEmpty) ...[
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: Container(
-                  constraints: const BoxConstraints(maxHeight: 300),
-                  width: double.infinity,
-                  color: Colors.black12,
-                  child: isVideo
-                      ? Container(
-                    height: 200,
-                    alignment: Alignment.center,
-                    color: Colors.black,
-                    child: const Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.play_circle_fill, color: Colors.white,
-                            size: 50),
-                        SizedBox(height: 8),
-                        Text("Video Content", style: TextStyle(
-                            color: Colors.white70, fontSize: 12)),
-                      ],
-                    ),
-                  )
-                      : Image.network(
-                    mediaUrl,
-                    fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) =>
-                    const Padding(
-                      padding: EdgeInsets.all(16.0),
-                      child: Text("Could not load media", style: TextStyle(
-                          color: Colors.grey)),
+              GestureDetector(
+                onTap: () {
+                  if (!isVideo) {
+                    // Show full screen image when tapped
+                    _showFullImage(context, mediaUrl);
+                  } else {
+                    // Optional: handle video full screen or playback if needed
+                  }
+                },
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    constraints: const BoxConstraints(maxHeight: 300),
+                    width: double.infinity,
+                    color: Colors.black12,
+                    child: isVideo
+                        ? Container(
+                      height: 200,
+                      alignment: Alignment.center,
+                      color: Colors.black,
+                      child: const Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.play_circle_fill, color: Colors.white, size: 50),
+                          SizedBox(height: 8),
+                          Text("Video Content", style: TextStyle(color: Colors.white70, fontSize: 12)),
+                        ],
+                      ),
+                    )
+                        : Image.network(
+                      mediaUrl,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) =>
+                      const Padding(
+                        padding: EdgeInsets.all(16.0),
+                        child: Text("Could not load media", style: TextStyle(color: Colors.grey)),
+                      ),
                     ),
                   ),
                 ),
@@ -284,6 +363,30 @@ class _LikecommentshareState extends State<Likecommentshare> with AutomaticKeepA
               ],
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  void _showFullImage(BuildContext context, String imageUrl) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => Scaffold(
+          backgroundColor: Colors.black,
+          appBar: AppBar(
+            backgroundColor: Colors.black,
+            iconTheme: const IconThemeData(color: Colors.white),
+          ),
+          body: Center(
+            child: InteractiveViewer(
+              panEnabled: true,
+              boundaryMargin: const EdgeInsets.all(20),
+              minScale: 0.5,
+              maxScale: 4.0,
+              child: Image.network(imageUrl),
+            ),
+          ),
         ),
       ),
     );

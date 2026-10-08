@@ -6,7 +6,6 @@ import 'package:pharmacist_profile/admobs/ads_test_banner.dart';
 import 'package:pharmacist_profile/image/cloudinary_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-
 class profileCreateScreen extends StatefulWidget {
   final Map<String, dynamic>? userData;
   const profileCreateScreen({super.key, this.userData});
@@ -44,6 +43,7 @@ class _profileCreateScreenState extends State<profileCreateScreen> {
 
   final _cloudinary = CloudinaryService();
   final _supabase = Supabase.instance.client;
+  final ImagePicker _imagePicker = ImagePicker(); // Added ImagePicker instance
   String? _selectedSpecialty;
   String? _selectedGrade;
   final _otpController = TextEditingController();
@@ -79,7 +79,7 @@ class _profileCreateScreenState extends State<profileCreateScreen> {
   @override
   void initState() {
     super.initState();
-    _aboutController.text = "Dedicated health professional with [Number] years of experience in [Specialization]. Committed to providing high-quality, patient-centered care with a focus on accurate diagnosis and evidence-based treatment plans.";
+    _aboutController.text = "Write About Yourself.";
   }
 
   void handleVerify() {
@@ -128,26 +128,105 @@ class _profileCreateScreenState extends State<profileCreateScreen> {
     }
   }
 
-  Future<void> _pickImage({bool isCover = false}) async {
-    try {
-      final ImagePicker picker = ImagePicker();
-      final XFile? pickedFile = await picker.pickImage(
-        source: ImageSource.gallery,
-        imageQuality: 70,
-        maxWidth: isCover ? 1200 : 800,
+  // Updated Image Picker with Policy Dialog, Gallery/Camera choice, and Size Validation
+  Future<void> _pickAndValidateMedia({bool isCover = false}) async {
+    final bool? shouldProceed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Media Upload Policy"),
+        content: const Text(
+          "Strictly prohibited: Nudity, sexually explicit content, adult material, or violence. "
+              "All uploads are automatically scanned by AI moderation. Violating accounts will be banned.\n\nDo you wish to proceed?",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text("Cancel"),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text("I Agree", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldProceed != true) return;
+
+    if (!mounted) return;
+
+    // Show Bottom Sheet to choose between Gallery or Camera
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) => Container(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              isCover ? "Select Cover Photo Source" : "Select Profile Picture Source",
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 10),
+            ListTile(
+              leading: const Icon(Icons.photo_library, color: Colors.blueAccent),
+              title: const Text("Choose from Gallery"),
+              onTap: () async {
+                Navigator.pop(sheetContext);
+                final XFile? pickedFile = await _imagePicker.pickImage(
+                  source: ImageSource.gallery,
+                  imageQuality: 70,
+                  maxWidth: isCover ? 1200 : 800,
+                );
+                if (pickedFile != null) {
+                  _validateAndSetFile(File(pickedFile.path), isCover);
+                }
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.camera_alt, color: Colors.green),
+              title: const Text("Take a Picture"),
+              onTap: () async {
+                Navigator.pop(sheetContext);
+                final XFile? pickedFile = await _imagePicker.pickImage(
+                  source: ImageSource.camera,
+                  imageQuality: 70,
+                  maxWidth: isCover ? 1200 : 800,
+                );
+                if (pickedFile != null) {
+                  _validateAndSetFile(File(pickedFile.path), isCover);
+                }
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Helper to validate size and update state
+  Future<void> _validateAndSetFile(File file, bool isCover) async {
+    final fileSize = await file.length();
+    if (fileSize > 5 * 1024 * 1024) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Image size must be less than 5MB.")),
       );
-      if (pickedFile != null) {
-        setState(() {
-          if (isCover) {
-            _coverFile = File(pickedFile.path);
-          } else {
-            _imageFile = File(pickedFile.path);
-          }
-        });
-      }
-    } catch (e) {
-      debugPrint("DEBUG: Error picking image: $e");
+      return;
     }
+
+    setState(() {
+      if (isCover) {
+        _coverFile = file;
+      } else {
+        _imageFile = file;
+      }
+    });
   }
 
   Future<void> _verifyAndSave() async {
@@ -177,27 +256,21 @@ class _profileCreateScreenState extends State<profileCreateScreen> {
 
         // 2. Handle Profile Image Replacement / Deletion
         if (_imageFile != null) {
-          // If there was an old image, delete it from Cloudinary first
           if (oldImageUrl != null && oldImageUrl.isNotEmpty) {
             await _cloudinary.deleteMedia(oldImageUrl);
           }
-          // Upload the new profile image
           imageUrl = await _cloudinary.uploadImage(_imageFile!);
         } else {
-          // Keep the existing image URL if no new file was picked
           imageUrl = oldImageUrl;
         }
 
         // 3. Handle Cover Image Replacement / Deletion
         if (_coverFile != null) {
-          // If there was an old cover image, delete it from Cloudinary first
           if (oldCoverUrl != null && oldCoverUrl.isNotEmpty) {
             await _cloudinary.deleteMedia(oldCoverUrl);
           }
-          // Upload the new cover image
           coverUrl = await _cloudinary.uploadImage(_coverFile!);
         } else {
-          // Keep the existing cover URL if no new file was picked
           coverUrl = oldCoverUrl;
         }
 
@@ -279,7 +352,6 @@ class _profileCreateScreenState extends State<profileCreateScreen> {
   Future<void> _verifyPcbViaCloudFunction() async {
     final bool isStudent = _selectedSpecialty == "Student Pharmacy";
 
-    // If the specialty is Student Pharmacy, skip verification completely
     if (isStudent) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -395,14 +467,14 @@ class _profileCreateScreenState extends State<profileCreateScreen> {
     );
   }
 
-  // --- REGULAR CREATE profile FORM VIEW ---
+  // --- REGULAR CREATE PROFILE FORM VIEW ---
   Widget _buildCreateprofileForm(
       String credentialLabel, String universityLabel, String deptLabel, String batchLabel) {
     return Form(
       key: _formKey,
       child: Column(
         children: [
-          // --- FACEBOOK-STYLE profile & COVER HEADER ---
+          // --- FACEBOOK-STYLE PROFILE & COVER HEADER ---
           Container(
             decoration: BoxDecoration(
               color: Colors.white,
@@ -429,7 +501,7 @@ class _profileCreateScreenState extends State<profileCreateScreen> {
                       top: 10,
                       right: 10,
                       child: InkWell(
-                        onTap: () => _pickImage(isCover: true),
+                        onTap: () => _pickAndValidateMedia(isCover: true), // Updated handler call
                         child: Container(
                           padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
@@ -477,7 +549,7 @@ class _profileCreateScreenState extends State<profileCreateScreen> {
                               bottom: 0,
                               right: 0,
                               child: InkWell(
-                                onTap: () => _pickImage(isCover: false),
+                                onTap: () => _pickAndValidateMedia(isCover: false), // Updated handler call
                                 child: Container(
                                   padding: const EdgeInsets.all(6),
                                   decoration: const BoxDecoration(
@@ -522,7 +594,19 @@ class _profileCreateScreenState extends State<profileCreateScreen> {
               _buildSpecialtyDropdown(),
               _buildGradeDropdown(),
               _buildStatusDropdown(),
-              _buildField("Bio", _aboutController, maxLines: 4, icon: Icons.info_outline),
+              _buildField(
+                "Bio",
+                _aboutController,
+                maxLines: 4,
+                maxLength: 130, // Limits characters so it stays concise and shows fully
+                icon: Icons.info_outline,
+                validator: (value) {
+                  if (value != null && value.length > 130) {
+                    return "Bio cannot exceed 130 characters";
+                  }
+                  return null;
+                },
+              ),
             ],
           ),
           const SizedBox(height: 12),
@@ -798,19 +882,38 @@ class _profileCreateScreenState extends State<profileCreateScreen> {
       String label,
       TextEditingController controller, {
         int maxLines = 1,
+        int? maxLength,
         IconData? icon,
-        TextInputType keyboardType = TextInputType.text,
+        TextInputType? keyboardType, // Changed to allow dynamic override
         String? Function(String?)? validator,
       }) {
+    // Automatically use multiline keyboard if maxLines > 1
+    final effectiveKeyboardType = keyboardType ?? (maxLines > 1 ? TextInputType.multiline : TextInputType.text);
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
       child: TextFormField(
         controller: controller,
         maxLines: maxLines,
-        keyboardType: keyboardType,
+        minLines: maxLines > 1 ? maxLines : 1, // Keeps the box locked to the 4-line height
+        maxLength: maxLength,
+        keyboardType: effectiveKeyboardType,
+        style: const TextStyle(
+          fontSize: 14,
+          color: Colors.black87,
+          height: 1.3, // Ensures lines don't crowd each other and get cut off
+        ),
         decoration: InputDecoration(
           labelText: label,
-          prefixIcon: icon != null ? Icon(icon, color: Colors.blueAccent, size: 22) : null,
+          alignLabelWithHint: maxLines > 1, // Aligns the label to the top for multi-line boxes
+          labelStyle: const TextStyle(color: Colors.grey, fontSize: 13),
+          prefixIcon: icon != null
+              ? Padding(
+            // Pushes icon to the top for multi-line inputs so it doesn't center-align awkwardly
+            padding: EdgeInsets.only(bottom: maxLines > 1 ? (maxLines * 14.0) : 0),
+            child: Icon(icon, color: Colors.blueAccent, size: 22),
+          )
+              : null,
           filled: true,
           fillColor: const Color(0xFFF7F8FA),
           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -860,16 +963,15 @@ class _profileCreateScreenState extends State<profileCreateScreen> {
         items: _specialtyOptions.map((String specialty) {
           return DropdownMenuItem<String>(
             value: specialty,
-            child: Text(specialty, overflow: TextOverflow.ellipsis),
+            child: Text(specialty),
           );
         }).toList(),
         onChanged: (String? newValue) {
           setState(() {
             _selectedSpecialty = newValue;
-            _specialtyController.text = newValue!;
           });
         },
-        validator: (value) => value == null ? "Please select a specialty" : null,
+        validator: (value) => value == null ? "Please select a specialization" : null,
       ),
     );
   }
@@ -879,10 +981,9 @@ class _profileCreateScreenState extends State<profileCreateScreen> {
       padding: const EdgeInsets.only(bottom: 14),
       child: DropdownButtonFormField<String>(
         value: _selectedGrade,
-        menuMaxHeight: 300,
         decoration: InputDecoration(
           labelText: "Grade",
-          prefixIcon: const Icon(Icons.military_tech_outlined, color: Colors.blueAccent, size: 22),
+          prefixIcon: const Icon(Icons.grade_outlined, color: Colors.blueAccent, size: 22),
           filled: true,
           fillColor: const Color(0xFFF7F8FA),
           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -902,13 +1003,12 @@ class _profileCreateScreenState extends State<profileCreateScreen> {
         items: _gradeOptions.map((String grade) {
           return DropdownMenuItem<String>(
             value: grade,
-            child: Text(grade, overflow: TextOverflow.ellipsis),
+            child: Text(grade),
           );
         }).toList(),
         onChanged: (String? newValue) {
           setState(() {
             _selectedGrade = newValue;
-            _gradeController.text = newValue!;
           });
         },
         validator: (value) => value == null ? "Please select a grade" : null,
@@ -923,7 +1023,7 @@ class _profileCreateScreenState extends State<profileCreateScreen> {
         value: _selectedStatus,
         decoration: InputDecoration(
           labelText: "Availability Status",
-          prefixIcon: const Icon(Icons.circle, color: Colors.green, size: 14),
+          prefixIcon: const Icon(Icons.toggle_on_outlined, color: Colors.blueAccent, size: 22),
           filled: true,
           fillColor: const Color(0xFFF7F8FA),
           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),

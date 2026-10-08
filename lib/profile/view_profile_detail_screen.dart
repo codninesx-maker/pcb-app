@@ -806,7 +806,7 @@ class _profileDetailScreenState extends State<profileDetailScreen> {
   }
 
   Widget _buildDisplayField(String label, String value,
-      {int maxLines = 1,
+      {int? maxLines, // Changed from default 1 to allow full display when needed
         IconData? icon,
         Color iconColor = Colors.blueAccent}) {
     return Padding(
@@ -815,12 +815,10 @@ class _profileDetailScreenState extends State<profileDetailScreen> {
         decoration: InputDecoration(
           labelText: label,
           labelStyle: const TextStyle(color: Colors.grey, fontSize: 13),
-          prefixIcon:
-          icon != null ? Icon(icon, color: iconColor, size: 22) : null,
+          prefixIcon: icon != null ? Icon(icon, color: iconColor, size: 22) : null,
           filled: true,
           fillColor: const Color(0xFFF7F8FA),
-          contentPadding:
-          const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
             borderSide: BorderSide.none,
@@ -832,12 +830,13 @@ class _profileDetailScreenState extends State<profileDetailScreen> {
         ),
         child: Text(
           value,
-          maxLines: maxLines,
-          overflow: TextOverflow.ellipsis,
+          maxLines: maxLines, // If null or 4, it wraps cleanly up to that limit (or fully if null)
+          overflow: maxLines != null ? TextOverflow.ellipsis : TextOverflow.visible,
           style: const TextStyle(
             fontSize: 14,
             color: Colors.black87,
             fontWeight: FontWeight.w500,
+            height: 1.4, // Adds breathing room between lines for multi-line text like Bios
           ),
         ),
       ),

@@ -7,6 +7,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:pharmacist_profile/image/cloudinary_service.dart';
 import 'package:file_picker/file_picker.dart';
 
+import '../dashboard/post/image_reels.dart';
+
 class EditprofileScreen extends StatefulWidget {
   final Map<String, dynamic>? userData;
 
@@ -29,6 +31,7 @@ class _EditprofileScreenState extends State<EditprofileScreen> {
   final _bmdcController = TextEditingController(); // Company Name
   final _nidController = TextEditingController(); // Job Title
   final _pcbLicenseController = TextEditingController();
+  final ImagePickerHelper _imagePickerHelper = ImagePickerHelper();
 
   String _selectedStatus = "Available";
   final List<String> _statusOptions = ["Available", "Unavailable"];
@@ -103,8 +106,8 @@ class _EditprofileScreenState extends State<EditprofileScreen> {
         : null;
   }
 
-  Future<void> _pickAndValidateMedia({bool isCover = false, bool pickVideo = false}) async {
-    // ⚠️ Security & Policy Warning Check to block adult/nude content
+  Future<void> _pickAndValidateMedia({bool isCover = false}) async {
+    // ⚠️ Security & Policy Warning Check
     final bool? shouldProceed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -129,63 +132,69 @@ class _EditprofileScreenState extends State<EditprofileScreen> {
 
     if (shouldProceed != true) return;
 
-    try {
-      final allowedExtensions = pickVideo
-          ? ['mp4', 'mov', 'avi', 'mkv']
-          : ['jpg', 'jpeg', 'png', 'webp'];
+    // Show bottom sheet to choose between Gallery or Camera
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) => Container(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              isCover ? "Select Cover Photo Source" : "Select Profile Picture Source",
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 10),
+            ListTile(
+              leading: const Icon(Icons.photo_library, color: Colors.blueAccent),
+              title: const Text("Choose from Gallery"),
+              onTap: () async {
+                Navigator.pop(sheetContext);
+                final file = await _imagePickerHelper.pickImage(ImageSource.gallery);
+                if (file != null) {
+                  _validateAndSetFile(file, isCover);
+                }
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.camera_alt, color: Colors.green),
+              title: const Text("Take a Picture"),
+              onTap: () async {
+                Navigator.pop(sheetContext);
+                final file = await _imagePickerHelper.pickImage(ImageSource.camera);
+                if (file != null) {
+                  _validateAndSetFile(file, isCover);
+                }
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
-      FilePickerResult? result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: allowedExtensions,
+// Helper to validate size and update state
+  Future<void> _validateAndSetFile(File file, bool isCover) async {
+    final fileSize = await file.length();
+    if (fileSize > 5 * 1024 * 1024) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Image size must be less than 5MB.")),
       );
-
-      if (result != null) {
-        PlatformFile file = result.files.first;
-        final extension = file.extension?.toLowerCase() ?? '';
-
-        final isVideoFile = ['mp4', 'mov', 'avi', 'mkv'].contains(extension);
-        final isImageFile = ['jpg', 'jpeg', 'png', 'webp'].contains(extension);
-
-        if (!isImageFile && !isVideoFile) {
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Unsupported file format selected.")),
-          );
-          return;
-        }
-
-        if (isImageFile && file.size > 5 * 1024 * 1024) {
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Image size must be less than 2MB.")),
-          );
-          return;
-        }
-
-        if (isVideoFile && file.size > 50 * 1024 * 1024) {
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Video size must be less than 10MB.")),
-          );
-          return;
-        }
-
-        if (file.path != null) {
-          setState(() {
-            if (isVideoFile) {
-              _videoFile = File(file.path!);
-            } else if (isCover) {
-              _coverFile = File(file.path!);
-            } else {
-              _imageFile = File(file.path!);
-            }
-          });
-          debugPrint("Valid media selected: ${file.name} (${file.size} bytes)");
-        }
-      }
-    } catch (e) {
-      debugPrint("DEBUG: Error picking media: $e");
+      return;
     }
+
+    setState(() {
+      if (isCover) {
+        _coverFile = file;
+      } else {
+        _imageFile = file;
+      }
+    });
   }
 
   Future<void> _verifyPcbViaCloudFunction() async {
@@ -486,7 +495,19 @@ class _EditprofileScreenState extends State<EditprofileScreen> {
                   _buildSpecialtyDropdown(),
                   _buildGradeDropdown(),
                   _buildStatusDropdown(),
-                  _buildField("Bio", _aboutController, maxLines: 4, icon: Icons.info_outline),
+                  _buildField(
+                    "Bio",
+                    _aboutController,
+                    maxLines: 4,
+                    maxLength: 130, // Limits characters so it stays concise and shows fully
+                    icon: Icons.info_outline,
+                    validator: (value) {
+                      if (value != null && value.length > 130) {
+                        return "Bio cannot exceed 130 characters";
+                      }
+                      return null;
+                    },
+                  ),
                 ],
               ),
               const SizedBox(height: 12),
@@ -657,19 +678,38 @@ class _EditprofileScreenState extends State<EditprofileScreen> {
       String label,
       TextEditingController controller, {
         int maxLines = 1,
+        int? maxLength,
         IconData? icon,
-        TextInputType keyboardType = TextInputType.text,
+        TextInputType? keyboardType, // Changed to allow dynamic override
         String? Function(String?)? validator,
       }) {
+    // Automatically use multiline keyboard if maxLines > 1
+    final effectiveKeyboardType = keyboardType ?? (maxLines > 1 ? TextInputType.multiline : TextInputType.text);
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
       child: TextFormField(
         controller: controller,
         maxLines: maxLines,
-        keyboardType: keyboardType,
+        minLines: maxLines > 1 ? maxLines : 1, // Keeps the box locked to the 4-line height
+        maxLength: maxLength,
+        keyboardType: effectiveKeyboardType,
+        style: const TextStyle(
+          fontSize: 14,
+          color: Colors.black87,
+          height: 1.3, // Ensures lines don't crowd each other and get cut off
+        ),
         decoration: InputDecoration(
           labelText: label,
-          prefixIcon: icon != null ? Icon(icon, color: Colors.blueAccent, size: 22) : null,
+          alignLabelWithHint: maxLines > 1, // Aligns the label to the top for multi-line boxes
+          labelStyle: const TextStyle(color: Colors.grey, fontSize: 13),
+          prefixIcon: icon != null
+              ? Padding(
+            // Pushes icon to the top for multi-line inputs so it doesn't center-align awkwardly
+            padding: EdgeInsets.only(bottom: maxLines > 1 ? (maxLines * 14.0) : 0),
+            child: Icon(icon, color: Colors.blueAccent, size: 22),
+          )
+              : null,
           filled: true,
           fillColor: const Color(0xFFF7F8FA),
           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),

@@ -1,18 +1,36 @@
 import 'dart:io';
 import 'package:cloudinary_public/cloudinary_public.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:dio/dio.dart' as dio_pkg;
 
 class CloudinaryService {
   // General Cloudinary instance for images
   final cloudinaryImage = CloudinaryPublic('dow7ik5rv', 'doctor_preset', cache: false);
 
-  // Dedicated Cloudinary instance for videos
-  final cloudinaryVideo = CloudinaryPublic('dow7ik5rv', 'video_preset', cache: false);
+  // Dedicated high-speed Dio client for video uploads with extended timeouts
+  final dio_pkg.Dio _dioVideoClient = dio_pkg.Dio(
+    dio_pkg.BaseOptions(
+      connectTimeout: const Duration(seconds: 45),
+      receiveTimeout: const Duration(seconds: 60),
+      sendTimeout: const Duration(minutes: 10),
+    ),
+  );
+
+  // 🛑 BANDWIDTH PROTECTION RESTRICTIONS
+  static const int maxImageSizeBytes = 5 * 1024 * 1024; // 5 MB Max for Images
+  static const int maxVideoSizeBytes = 20 * 1024 * 1024; // 20 MB Max for Videos (~60s Reels)
 
   Future<String?> uploadImage(File imageFile) async {
     try {
+      final fileSize = await imageFile.length();
+      if (fileSize > maxImageSizeBytes) {
+        debugPrint("DEBUG ERROR: Image size exceeds the 5MB limit.");
+        return null;
+      }
+
       CloudinaryResponse response = await cloudinaryImage.uploadFile(
         CloudinaryFile.fromFile(
           imageFile.path,
@@ -30,17 +48,62 @@ class CloudinaryService {
 
   Future<String?> uploadVideo(File videoFile) async {
     try {
-      CloudinaryResponse response = await cloudinaryVideo.uploadFile(
-        CloudinaryFile.fromFile(
-          videoFile.path,
-          resourceType: CloudinaryResourceType.Video,
-          folder: 'video',
-        ),
+      // 1. Enforce Video Size Limit
+      final fileSize = await videoFile.length();
+      if (fileSize > maxVideoSizeBytes) {
+        debugPrint("DEBUG ERROR: Video size (${(fileSize / (1024 * 1024)).toStringAsFixed(1)}MB) exceeds the 20MB limit.");
+        return null;
+      }
+
+      const String cloudName = 'dow7ik5rv';
+      const String uploadPreset = 'video_preset';
+      final String url = "https://api.cloudinary.com/v1_1/$cloudName/video/upload";
+
+      // 2. Prepare Fast Multipart Form Data
+      dio_pkg.FormData formData = dio_pkg.FormData.fromMap({
+        'file': await dio_pkg.MultipartFile.fromFile(videoFile.path),
+        'upload_preset': uploadPreset,
+        'folder': 'video',
+      });
+
+      debugPrint("DEBUG: Starting fast video upload via Dio client (${(fileSize / (1024 * 1024)).toStringAsFixed(2)} MB)...");
+
+      // 3. Post with live progress logging so you can monitor speed in the console
+      dio_pkg.Response response = await _dioVideoClient.post(
+        url,
+        data: formData,
+        onSendProgress: (int sent, int total) {
+          if (total != -1) {
+            final progress = (sent / total * 100).toStringAsFixed(0);
+            debugPrint("Fast Video Upload Progress: $progress% ($sent / $total bytes)");
+          }
+        },
       );
-      debugPrint("DEBUG: Video Upload Success! URL: ${response.secureUrl}");
-      return response.secureUrl;
+
+      // 4. Parse Response
+      if (response.statusCode == 200 && response.data != null) {
+        final data = response.data;
+        if (data is Map && data.containsKey('secure_url')) {
+          final secureUrl = data['secure_url']?.toString();
+          if (secureUrl != null && secureUrl.isNotEmpty) {
+            debugPrint("DEBUG: Video Upload Success! URL: $secureUrl");
+            return secureUrl;
+          }
+        }
+        debugPrint("DEBUG ERROR: Cloudinary response missing 'secure_url': $data");
+        return null;
+      } else {
+        debugPrint("DEBUG ERROR: Cloudinary returned status code ${response.statusCode}");
+        return null;
+      }
+    } on dio_pkg.DioException catch (e) {
+      debugPrint("DEBUG: DIO EXCEPTION in uploadVideo: ${e.message}");
+      if (e.response != null) {
+        debugPrint("Cloudinary Error Response Body: ${e.response?.data}");
+      }
+      return null;
     } catch (e) {
-      debugPrint("DEBUG: EXCEPTION in uploadVideo: $e");
+      debugPrint("DEBUG: UNEXPECTED EXCEPTION in uploadVideo: $e");
       return null;
     }
   }

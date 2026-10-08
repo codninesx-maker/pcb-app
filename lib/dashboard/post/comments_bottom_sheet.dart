@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'audiopop.dart';
+
 class CommentsBottomSheet extends StatefulWidget {
   final dynamic postId;
   final String? postOwnerId;
@@ -161,6 +163,9 @@ class _CommentsBottomSheetState extends State<CommentsBottomSheet> {
       updatedComment['liked_by'] = newLikedBy;
       _comments[commentIndex] = updatedComment;
     });
+
+    // 🔊 PLAY POP SOUND HERE FOR BOTH LIKE & UNLIKE
+    AudioPop.play();
 
     try {
       await _supabase

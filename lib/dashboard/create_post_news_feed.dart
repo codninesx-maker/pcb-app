@@ -459,14 +459,24 @@ class _CommunityNewsFeedSectionState extends State<CommunityNewsFeedSection> {
                           ],
                         ),
                         const SizedBox(height: 12),
+                        // --- FIXED LINKIFY WIDGET ---
                         if (content.isNotEmpty) ...[
                           Linkify(
                             onOpen: (link) async {
-                              final Uri url = Uri.parse(link.url);
-                              if (await canLaunchUrl(url)) {
-                                await launchUrl(url, mode: LaunchMode.externalApplication);
-                              } else {
-                                debugPrint('Could not launch ${link.url}');
+                              String urlString = link.url;
+                              // Ensure URL has a valid scheme so it opens properly in external browsers
+                              if (!urlString.startsWith('http://') && !urlString.startsWith('https://')) {
+                                urlString = 'https://$urlString';
+                              }
+                              final Uri url = Uri.parse(urlString);
+                              try {
+                                if (await canLaunchUrl(url)) {
+                                  await launchUrl(url, mode: LaunchMode.externalApplication);
+                                } else {
+                                  debugPrint('Could not launch $urlString');
+                                }
+                              } catch (e) {
+                                debugPrint('Error launching link: $e');
                               }
                             },
                             text: content,
@@ -477,10 +487,12 @@ class _CommunityNewsFeedSectionState extends State<CommunityNewsFeedSection> {
                             ),
                             linkStyle: const TextStyle(
                               color: Colors.blueAccent,
+                              fontWeight: FontWeight.w600,
                               decoration: TextDecoration.underline,
                             ),
                           ),
                         ],
+
                         if (postImageUrl != null && postImageUrl.toString().isNotEmpty) ...[
                           const SizedBox(height: 12),
                           GestureDetector(
@@ -570,6 +582,7 @@ class _CommunityNewsFeedSectionState extends State<CommunityNewsFeedSection> {
                                     onTap: () async {
                                       if (authUser == null) return;
                                       _playSound();
+                                      debugPrint("Play sound triggered for tap!");
 
                                       final currentUserId = authUser.id;
 

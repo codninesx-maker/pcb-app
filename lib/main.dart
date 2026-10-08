@@ -2,12 +2,12 @@ import 'package:flutter/foundation.dart'; // Required for kIsWeb
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dashboard/dashboard_view_screen.dart';
-import 'package:google_mobile_ads/google_mobile_ads.dart' 
-    if (dart.library.html) 'ads_stub.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart'
+if (dart.library.html) 'ads_stub.dart';
 
 // Conditionally import dart:html only when running on the web
 import 'web_helper_stub.dart'
-    if (dart.library.html) 'web_helper_web.dart';
+if (dart.library.html) 'web_helper_web.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -55,6 +55,9 @@ Future<void> _openPostById(BuildContext context, String postId) async {
           id,
           content,
           image_url,
+          media_url,
+          video_url,
+          media_type,
           created_at,
           user_id,
           likes_count,
@@ -67,9 +70,14 @@ Future<void> _openPostById(BuildContext context, String postId) async {
         .maybeSingle();
 
     if (!context.mounted) return;
-    Navigator.pop(context);
+    Navigator.pop(context); // Dismiss loading dialog
 
     if (response != null) {
+      // Normalize media URL across fields
+      final String? mediaUrl = response['media_url'] ?? response['video_url'] ?? response['image_url'];
+      final String? mediaType = response['media_type'];
+      final bool isVideo = mediaType == 'video' || (mediaUrl != null && (mediaUrl.endsWith('.mp4') || mediaUrl.contains('/video/')));
+
       showDialog(
         context: context,
         builder: (context) => AlertDialog(
@@ -81,7 +89,7 @@ Future<void> _openPostById(BuildContext context, String postId) async {
                 backgroundImage: response['pcb']?['image_url'] != null && response['pcb']['image_url'].toString().isNotEmpty
                     ? NetworkImage(response['pcb']['image_url'])
                     : null,
-                child: response['pcb']?['image_url'] == null || response['pcb']['image_url'].toString().isEmpty
+                child: response['pcb']?['image_url'] == null || response['pcb']['image_url'].toString().isNotEmpty == false
                     ? const Icon(Icons.person, color: Colors.grey)
                     : null,
               ),
@@ -99,18 +107,39 @@ Future<void> _openPostById(BuildContext context, String postId) async {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  response['content'] ?? '',
-                  style: const TextStyle(fontSize: 15, color: Colors.black87),
-                ),
-                if (response['image_url'] != null && response['image_url'].toString().isNotEmpty) ...[
+                if (response['content'] != null && response['content'].toString().isNotEmpty) ...[
+                  Text(
+                    response['content'],
+                    style: const TextStyle(fontSize: 15, color: Colors.black87),
+                  ),
+                ],
+                if (mediaUrl != null && mediaUrl.isNotEmpty) ...[
                   const SizedBox(height: 12),
                   ClipRRect(
                     borderRadius: BorderRadius.circular(12),
-                    child: Image.network(
-                      response['image_url'],
-                      fit: BoxFit.cover,
+                    child: SizedBox(
+                      height: 220, // 👈 Fixed height prevents vertical viewport layout crashes
                       width: double.infinity,
+                      child: isVideo
+                          ? Container(
+                        color: Colors.black,
+                        alignment: Alignment.center,
+                        child: const Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.play_circle_fill, color: Colors.white, size: 50),
+                            SizedBox(height: 8),
+                            Text("Video Content", style: TextStyle(color: Colors.white70, fontSize: 12)),
+                          ],
+                        ),
+                      )
+                          : Image.network(
+                        mediaUrl,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) => const Center(
+                          child: Text("Could not load media", style: TextStyle(color: Colors.grey)),
+                        ),
+                      ),
                     ),
                   ),
                 ],
