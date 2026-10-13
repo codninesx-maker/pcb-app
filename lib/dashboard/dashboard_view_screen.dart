@@ -239,8 +239,7 @@ class _DashboardViewScreenState extends State<DashboardViewScreen> {
             liked_by,
             pcb!pcb_posts_user_id_fkey (name, image_url)
           ''')
-          .order('created_at', ascending: false)
-          .limit(05);
+          .order('created_at', ascending: false);
 
       final List<Map<String, dynamic>> processedPosts = data.map((post) {
         final Map<String, dynamic> mutablePost = Map<String, dynamic>.from(post);

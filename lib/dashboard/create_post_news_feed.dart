@@ -305,6 +305,7 @@ class _CommunityNewsFeedSectionState extends State<CommunityNewsFeedSection> {
                 }
 
                 final post = posts[postIndex];
+
                 final profile = post['pcb'] ?? {};
                 final userName = profile['name'] ?? 'Anonymous Professional';
                 final userImage = profile['image_url'];
