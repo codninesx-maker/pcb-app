@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart'; // Required for kIsWeb
 import 'package:flutter/material.dart';
+import 'package:pharmacist_profile/notifications/FlutterNotificationService.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dashboard/dashboard_view_screen.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart'
@@ -21,6 +22,7 @@ Future<void> main() async {
     url: 'https://jqmlivtchooqbrwlsdzo.supabase.co',
     anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpxbWxpdnRjaG9vcWJyd2xzZHpvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE2NTQ2NTcsImV4cCI6MjA3NzIzMDY1N30.VIqjh70dqKfy5iP4Sb2jqvNOhMrFrbPA0fVP1Lqh4Bc',
   );
+  await NotificationService.initialize();
 
   runApp(const MyApp());
 }

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_linkify/flutter_linkify.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:pharmacist_profile/admobs/ads_test_banner.dart';
+import 'package:pharmacist_profile/dashboard/post/edit_post.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../stats/views_screen.dart';
@@ -12,7 +14,6 @@ import '../dashboard/post/like_coments_share.dart';
 class profileDetailScreen extends StatefulWidget {
   final Map<String, dynamic> profile;
 
-  // FIX: Removed the redundant `profiles` parameter
   const profileDetailScreen({super.key, required this.profile});
 
   @override
@@ -20,8 +21,12 @@ class profileDetailScreen extends StatefulWidget {
 }
 
 class _profileDetailScreenState extends State<profileDetailScreen> {
+  final _supabase = Supabase.instance.client;
   late Map<String, dynamic> _profile;
   bool _isFollowing = false;
+
+  // Track expanded state for posts by post ID
+  final Map<String, bool> _expandedPosts = {};
 
   String? get _targetUserId => _profile['user_id']?.toString();
   String? get _targetPcbId => _profile['id']?.toString();
@@ -33,6 +38,10 @@ class _profileDetailScreenState extends State<profileDetailScreen> {
     _refreshData();
     _initializeprofile();
     _checkFollowStatus();
+    final viewedProfileId = widget.profile['id']?.toString();
+    if (viewedProfileId != null) {
+      _logProfileView(viewedProfileId);
+    }
   }
 
   String? get _targetId =>
@@ -147,7 +156,6 @@ class _profileDetailScreenState extends State<profileDetailScreen> {
 
     try {
       if (_isFollowing) {
-        // --- UNFOLLOW: Delete row ---
         await Supabase.instance.client
             .from('pcb_followers')
             .delete()
@@ -164,7 +172,6 @@ class _profileDetailScreenState extends State<profileDetailScreen> {
           const SnackBar(content: Text("Unfollowed")),
         );
       } else {
-        // --- FOLLOW: Insert row ---
         await Supabase.instance.client
             .from('pcb_followers')
             .insert({
@@ -205,7 +212,7 @@ class _profileDetailScreenState extends State<profileDetailScreen> {
 
       if (mounted) {
         setState(() {
-          _isFollowing = response != null; // True if record exists, false otherwise
+          _isFollowing = response != null;
         });
       }
     } catch (e) {
@@ -265,6 +272,39 @@ class _profileDetailScreenState extends State<profileDetailScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _logProfileView(String viewedProfileId) async {
+    try {
+      final authUser = _supabase.auth.currentUser;
+      if (authUser == null) return;
+
+      final profileResponse = await _supabase
+          .from('pcb')
+          .select('id')
+          .eq('user_id', authUser.id)
+          .maybeSingle();
+
+      if (profileResponse == null || profileResponse['id'] == null) {
+        debugPrint("⚠️ Skipping view log: User profile row does not exist in 'pcb' table yet.");
+        return;
+      }
+
+      final String viewerProfileId = profileResponse['id'].toString();
+
+      if (viewerProfileId == viewedProfileId) return;
+
+      // ✅ Insert using 'owner_id' matching your SQL schema
+      await _supabase.from('pcb_profile_views').insert({
+        'owner_id': viewedProfileId,
+        'viewer_id': viewerProfileId,
+        'created_at': DateTime.now().toIso8601String(),
+      });
+
+      debugPrint("✅ Profile view logged successfully.");
+    } catch (e) {
+      debugPrint("Error logging profile view: $e");
+    }
   }
 
   @override
@@ -523,8 +563,7 @@ class _profileDetailScreenState extends State<profileDetailScreen> {
                     iconColor: _profile['status'] == "Available"
                         ? Colors.green
                         : Colors.redAccent),
-                _buildDisplayField("Bio", _profile['about_profile'] ?? "N/A",
-                    icon: Icons.info_outline, maxLines: 4),
+                _buildDisplayField("Bio", _profile['about_profile'] ?? "N/A"),
               ],
             ),
             const SizedBox(height: 12),
@@ -598,11 +637,25 @@ class _profileDetailScreenState extends State<profileDetailScreen> {
             const SizedBox(height: 10),
 
             FutureBuilder<List<Map<String, dynamic>>>(
-              future: Supabase.instance.client
-                  .from('pcb_posts')
-                  .select()
-                  .eq('user_id', _targetId ?? '')
-                  .order('created_at', ascending: false),
+              future: () async {
+                final String pcbId = _targetPcbId ?? '';
+                final String userId = _targetUserId ?? '';
+
+                if (pcbId.isEmpty && userId.isEmpty) return <Map<String, dynamic>>[];
+
+                var query = Supabase.instance.client.from('pcb_posts').select();
+
+                if (pcbId.isNotEmpty && userId.isNotEmpty && pcbId != userId) {
+                  query = query.or('user_id.eq.$pcbId,user_id.eq.$userId');
+                } else if (userId.isNotEmpty) {
+                  query = query.eq('user_id', userId);
+                } else if (pcbId.isNotEmpty) {
+                  query = query.eq('user_id', pcbId);
+                }
+
+                final response = await query.order('created_at', ascending: false) as List;
+                return response.map((e) => Map<String, dynamic>.from(e)).toList();
+              }(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(
@@ -611,22 +664,15 @@ class _profileDetailScreenState extends State<profileDetailScreen> {
                           child: CircularProgressIndicator()));
                 }
 
-                // FIX APPLIED HERE: Map and normalize video/media fields
-                final userPosts = snapshot.data?.map((post) {
-                  final mutablePost = Map<String, dynamic>.from(post);
+                if (snapshot.hasError) {
+                  debugPrint("Error loading posts: ${snapshot.error}");
+                  return Padding(
+                    padding: const EdgeInsets.all(12.0),
+                    child: Text("Error loading posts: ${snapshot.error}", style: const TextStyle(color: Colors.red)),
+                  );
+                }
 
-                  mutablePost['user_name'] = _profile['name'] ?? 'Professional';
-                  mutablePost['user_avatar'] = imageUrl;
-
-                  // Normalize video URL if it's stored in video_url instead of media_url
-                  if ((mutablePost['media_url'] == null || mutablePost['media_url'].toString().isEmpty) &&
-                      (mutablePost['video_url'] != null && mutablePost['video_url'].toString().isNotEmpty)) {
-                    mutablePost['media_url'] = mutablePost['video_url'];
-                    mutablePost['media_type'] = 'video';
-                  }
-
-                  return mutablePost;
-                }).toList() ?? [];
+                final userPosts = snapshot.data ?? [];
 
                 if (userPosts.isEmpty) {
                   return Container(
@@ -649,76 +695,298 @@ class _profileDetailScreenState extends State<profileDetailScreen> {
                   itemCount: userPosts.length,
                   itemBuilder: (context, index) {
                     final post = userPosts[index];
-                    final content = post['content'] ?? '';
+                    final postId = post['id']?.toString() ?? index.toString();
+                    final postUserId = post['user_id']?.toString() ?? '';
+
+                    final content = post['content'] ?? post['title'] ?? post['description'] ?? '';
+                    final postImageUrl = post['image_url'] ?? post['media_url'];
+                    final postVideoUrl = post['video_url'];
+                    final mediaType = post['media_type'];
+
+                    final userName = _profile['name'] ?? 'Professional';
+                    final userImage = imageUrl;
 
                     final currentUserId = Supabase.instance.client.auth.currentUser?.id;
-                    final postUserId = post['user_id'];
                     final isMyPost = currentUserId != null && postUserId == currentUserId;
+                    final bool isExpanded = _expandedPosts[postId] ?? false;
 
-                    return GestureDetector(
-                      onLongPress: () {
-                        showModalBottomSheet(
-                          context: context,
-                          shape: const RoundedRectangleBorder(
-                            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-                          ),
-                          builder: (BuildContext context) {
-                            return SafeArea(
-                              child: Wrap(
-                                children: [
-                                  const Padding(
-                                    padding: EdgeInsets.fromLTRB(20, 16, 20, 8),
+                    return Card(
+                      key: ValueKey(postId),
+                      margin: const EdgeInsets.only(bottom: 12),
+                      elevation: 0,
+                      color: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        side: BorderSide(color: Colors.grey.shade200),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // Header (Avatar + Name)
+                            Row(
+                              children: [
+                                // --- CLICKABLE AVATAR ---
+                                GestureDetector(
+                                  onTap: () {
+                                    if (userImage != null && userImage.toString().isNotEmpty) {
+                                      _showFullImage(context, userImage.toString());
+                                    }
+                                  },
+                                  child: CircleAvatar(
+                                    radius: 20,
+                                    backgroundColor: Colors.blueAccent.withOpacity(0.1),
+                                    backgroundImage: (userImage != null && userImage.toString().isNotEmpty)
+                                        ? NetworkImage(userImage.toString())
+                                        : null,
+                                    child: (userImage == null || userImage.toString().isEmpty)
+                                        ? const Icon(Icons.person, size: 20, color: Colors.blueAccent)
+                                        : null,
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+
+                                // --- CLICKABLE NAME ---
+                                Expanded(
+                                  child: GestureDetector(
+                                    onTap: () {
+                                      profileDetailScreen;
+                                    },
                                     child: Text(
-                                      "Manage Post",
-                                      style: TextStyle(
-                                        fontSize: 16,
+                                      userName,
+                                      style: const TextStyle(
                                         fontWeight: FontWeight.bold,
-                                        color: Colors.grey,
+                                        fontSize: 15,
                                       ),
                                     ),
                                   ),
-                                  ListTile(
-                                    leading: const Icon(Icons.copy, color: Colors.blueGrey),
-                                    title: const Text("Copy Text"),
-                                    onTap: () {
-                                      Navigator.pop(context);
-                                      if (content.isNotEmpty) {
-                                        Clipboard.setData(ClipboardData(text: content));
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          const SnackBar(
-                                            content: Text("Post text copied to clipboard!"),
+                                ),
+
+                                // --- OPTIONS MENU ---
+                                IconButton(
+                                  icon: const Icon(Icons.more_vert, color: Colors.grey),
+                                  onPressed: () {
+                                    showModalBottomSheet(
+                                      context: context,
+                                      shape: const RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                                      ),
+                                      builder: (BuildContext context) {
+                                        return SafeArea(
+                                          child: Wrap(
+                                            children: [
+                                              const Padding(
+                                                padding: EdgeInsets.fromLTRB(20, 16, 20, 8),
+                                                child: Text(
+                                                  "Manage Post",
+                                                  style: TextStyle(
+                                                    fontSize: 16,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: Colors.grey,
+                                                  ),
+                                                ),
+                                              ),
+                                              ListTile(
+                                                leading: const Icon(Icons.copy, color: Colors.blueGrey),
+                                                title: const Text("Copy Text"),
+                                                onTap: () {
+                                                  Navigator.pop(context);
+                                                  if (content.isNotEmpty) {
+                                                    final String postLink = "https://play.google.com/store/apps/details?id=com.rxai.pcb";
+                                                    final String combinedText = "$content\n\nDownload PCB App: $postLink";
+
+                                                    Clipboard.setData(ClipboardData(text: combinedText));
+                                                    ScaffoldMessenger.of(context).showSnackBar(
+                                                      const SnackBar(
+                                                        content: Text("Post text and app link copied to clipboard!"),
+                                                      ),
+                                                    );
+                                                  }
+                                                },
+                                              ),
+                                              if (isMyPost) ...[
+                                                ListTile(
+                                                  leading: const Icon(Icons.edit, color: Colors.blueAccent),
+                                                  title: const Text("Edit Post"),
+                                                  onTap: () async {
+                                                    Navigator.pop(context);
+                                                    final result = await Navigator.push(
+                                                      context,
+                                                      MaterialPageRoute(
+                                                        builder: (context) => EditPostScreen(post: post),
+                                                      ),
+                                                    );
+                                                    if (result == true) {
+                                                      setState(() {}); // Refresh post items view
+                                                    }
+                                                  },
+                                                ),
+                                                ListTile(
+                                                  leading: const Icon(Icons.delete, color: Colors.redAccent),
+                                                  title: const Text("Delete Post"),
+                                                  onTap: () async {
+                                                    Navigator.pop(context);
+
+                                                    // Direct Supabase delete implementation
+                                                    try {
+                                                      await Supabase.instance.client
+                                                          .from('pcb_posts')
+                                                          .delete()
+                                                          .eq('id', post['id']);
+
+                                                      setState(() {}); // Refresh list
+                                                      if (context.mounted) {
+                                                        ScaffoldMessenger.of(context).showSnackBar(
+                                                          const SnackBar(content: Text("Post deleted successfully")),
+                                                        );
+                                                      }
+                                                    } catch (e) {
+                                                      debugPrint("Error deleting post: $e");
+                                                      if (context.mounted) {
+                                                        ScaffoldMessenger.of(context).showSnackBar(
+                                                          const SnackBar(content: Text("Failed to delete post")),
+                                                        );
+                                                      }
+                                                    }
+                                                  },
+                                                ),
+                                              ],
+                                            ],
                                           ),
                                         );
-                                      }
-                                    },
-                                  ),
-                                  if (isMyPost) ...[
-                                    ListTile(
-                                      leading: const Icon(Icons.delete, color: Colors.redAccent),
-                                      title: const Text("Delete Post"),
-                                      onTap: () {
-                                        Navigator.pop(context);
                                       },
+                                    );
+                                  },
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+
+                            // Content Text with See More / See Less Toggle
+                            if (content.isNotEmpty) ...[
+                              LayoutBuilder(
+                                builder: (context, constraints) {
+                                  final bool isLongText = content.length > 150 || content.split('\n').length > 3;
+
+                                  return AnimatedSize(
+                                    duration: const Duration(milliseconds: 200),
+                                    curve: Curves.easeInOut,
+                                    alignment: Alignment.topCenter,
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Linkify(
+                                          onOpen: (link) async {
+                                            String urlString = link.url;
+                                            if (!urlString.startsWith('http://') && !urlString.startsWith('https://')) {
+                                              urlString = 'https://$urlString';
+                                            }
+                                            final Uri url = Uri.parse(urlString);
+                                            try {
+                                              if (await canLaunchUrl(url)) {
+                                                await launchUrl(url, mode: LaunchMode.externalApplication);
+                                              } else {
+                                                debugPrint('Could not launch $urlString');
+                                              }
+                                            } catch (e) {
+                                              debugPrint('Error launching link: $e');
+                                            }
+                                          },
+                                          text: content,
+                                          maxLines: isExpanded ? null : 3,
+                                          overflow: isExpanded ? TextOverflow.visible : TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            fontSize: 14,
+                                            color: Colors.black87,
+                                            height: 1.4,
+                                          ),
+                                          linkStyle: const TextStyle(
+                                            color: Colors.blueAccent,
+                                            fontWeight: FontWeight.w600,
+                                            decoration: TextDecoration.underline,
+                                          ),
+                                        ),
+                                        if (isLongText) ...[
+                                          const SizedBox(height: 4),
+                                          GestureDetector(
+                                            onTap: () {
+                                              setState(() {
+                                                _expandedPosts[postId] = !isExpanded;
+                                              });
+                                            },
+                                            child: Text(
+                                              isExpanded ? "See Less" : "See More...",
+                                              style: const TextStyle(
+                                                color: Colors.blueAccent,
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 13,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ],
                                     ),
-                                  ] else ...[
-                                    ListTile(
-                                      leading: const Icon(Icons.report, color: Colors.orange),
-                                      title: const Text("Report Post"),
-                                      onTap: () {
-                                        Navigator.pop(context);
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          const SnackBar(content: Text("Post reported.")),
-                                        );
-                                      },
-                                    ),
-                                  ],
-                                ],
+                                  );
+                                },
                               ),
-                            );
-                          },
-                        );
-                      },
-                      child: Likecommentshare(post: post),
+                            ],
+
+                            // Image Media Preview
+                            if (postImageUrl != null && postImageUrl.toString().isNotEmpty && mediaType != 'video') ...[
+                              const SizedBox(height: 12),
+                              GestureDetector(
+                                onTap: () => _showFullImage(context, postImageUrl.toString()),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Image.network(
+                                    postImageUrl.toString(),
+                                    height: 200,
+                                    width: double.infinity,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
+                                  ),
+                                ),
+                              ),
+                            ],
+
+                            // Video Media Preview
+                            if ((postVideoUrl != null && postVideoUrl.toString().isNotEmpty) || mediaType == 'video') ...[
+                              const SizedBox(height: 12),
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Container(
+                                  height: 200,
+                                  width: double.infinity,
+                                  color: Colors.black,
+                                  child: const Center(
+                                    child: Icon(Icons.play_circle_fill, color: Colors.white, size: 50),
+                                  ),
+                                ),
+                              ),
+                            ],
+
+                            const SizedBox(height: 12),
+                            const Divider(height: 1, thickness: 0.5),
+                            const SizedBox(height: 4),
+
+                            // Like, Comment, Share Action Component
+                            Likecommentshare(
+                              post: post,
+                              onReactionChanged: (newLikesCount, isLiked) {
+                                // Update local post map value directly without full screen setState if needed
+                                post['likes_count'] = newLikesCount;
+                              },
+                              onShareChanged: (newSharesCount) {
+                                post['shares_count'] = newSharesCount;
+                              },
+                              onCommentChanged: (newCommentsCount) {
+                                post['comments_count'] = newCommentsCount;
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
                     );
                   },
                 );
@@ -806,9 +1074,7 @@ class _profileDetailScreenState extends State<profileDetailScreen> {
   }
 
   Widget _buildDisplayField(String label, String value,
-      {int? maxLines, // Changed from default 1 to allow full display when needed
-        IconData? icon,
-        Color iconColor = Colors.blueAccent}) {
+      {int? maxLines, IconData? icon, Color iconColor = Colors.blueAccent}) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
       child: InputDecorator(
@@ -825,26 +1091,20 @@ class _profileDetailScreenState extends State<profileDetailScreen> {
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
-            borderSide: BorderSide(color: Colors.grey.shade300, width: 1),
+            borderSide: BorderSide.none,
           ),
         ),
         child: Text(
           value,
-          maxLines: maxLines, // If null or 4, it wraps cleanly up to that limit (or fully if null)
-          overflow: maxLines != null ? TextOverflow.ellipsis : TextOverflow.visible,
-          style: const TextStyle(
-            fontSize: 14,
-            color: Colors.black87,
-            fontWeight: FontWeight.w500,
-            height: 1.4, // Adds breathing room between lines for multi-line text like Bios
-          ),
+          maxLines: maxLines ?? 3,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 15, color: Colors.black87),
         ),
       ),
     );
   }
 
-  Widget _buildInteractivePhoneField(String label, String value,
-      {IconData? icon}) {
+  Widget _buildInteractivePhoneField(String label, String value, {IconData? icon}) {
     final bool isPrivate = value.contains("Private");
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
@@ -852,40 +1112,28 @@ class _profileDetailScreenState extends State<profileDetailScreen> {
         decoration: InputDecoration(
           labelText: label,
           labelStyle: const TextStyle(color: Colors.grey, fontSize: 13),
-          prefixIcon: icon != null
-              ? const Icon(Icons.phone_outlined,
-              color: Colors.blueAccent, size: 22)
-              : null,
-          suffixIcon: !isPrivate
-              ? IconButton(
-            icon: const Icon(Icons.call, color: Colors.green),
-            onPressed: () {
-              final rawPhone = _profile['phone'];
-              if (rawPhone != null) {
-                _makePhoneCall(rawPhone.toString());
-              }
-            },
-          )
-              : null,
+          // 🛑 FIX: Removed 'const' here because 'icon' is a runtime variable
+          prefixIcon: icon != null ? Icon(icon, color: Colors.blueAccent, size: 22) : null,
+          suffixIcon: isPrivate
+              ? null
+              : IconButton(
+            icon: const Icon(Icons.phone, color: Colors.green),
+            onPressed: () => _makePhoneCall(value),
+          ),
           filled: true,
           fillColor: const Color(0xFFF7F8FA),
-          contentPadding:
-          const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
             borderSide: BorderSide.none,
           ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: BorderSide(color: Colors.grey.shade300, width: 1),
-          ),
         ),
         child: Text(
           value,
-          style: const TextStyle(
-            fontSize: 14,
-            color: Colors.black87,
-            fontWeight: FontWeight.w500,
+          style: TextStyle(
+            fontSize: 15,
+            color: isPrivate ? Colors.grey : Colors.black87,
+            fontWeight: isPrivate ? FontWeight.normal : FontWeight.bold,
           ),
         ),
       ),

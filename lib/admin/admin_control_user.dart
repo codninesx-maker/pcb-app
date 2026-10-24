@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:pharmacist_profile/dashboard/post/edit_post.dart';
 import 'package:pharmacist_profile/profile/edit_profile_screen.dart';
-import 'package:pharmacist_profile/profile/profile-create_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:pharmacist_profile/profile/view_profile_detail_screen.dart';
 
@@ -75,7 +74,9 @@ class _AdminControlUserScreenState extends State<AdminControlUserScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text("Delete User Profile & Data"),
-        content: Text("Are you sure you want to permanently delete ${user['name'] ?? 'this user'} and all their associated posts/comments from the database? This action cannot be undone."),
+        content: Text(
+          "Are you sure you want to permanently delete ${user['name'] ?? 'this user'}, their posts, and images from Cloudinary? This cannot be undone.",
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -98,15 +99,26 @@ class _AdminControlUserScreenState extends State<AdminControlUserScreen> {
           builder: (context) => const Center(child: CircularProgressIndicator.adaptive()),
         );
 
-        final userId = user['user_id'];
-        final profileId = user['id'];
+        final String? profileId = user['id']?.toString();
+        final String? userId = user['user_id']?.toString();
+        final String? imageUrl = user['image_url']?.toString();
+        final String? coverUrl = user['cover_url']?.toString();
 
-        if (profileId != null) {
+        // 1. Delete images from Cloudinary via Edge Function
+        if (imageUrl != null && imageUrl.isNotEmpty) {
+          await _deleteFromCloudinary(imageUrl);
+        }
+        if (coverUrl != null && coverUrl.isNotEmpty) {
+          await _deleteFromCloudinary(coverUrl);
+        }
+
+        // 2. Delete related posts and comments in Supabase
+        if (profileId != null && profileId.isNotEmpty) {
           try {
             await _supabase.from('pcb_posts').delete().eq('user_id', profileId);
           } catch (_) {}
         }
-        if (userId != null) {
+        if (userId != null && userId.isNotEmpty) {
           try {
             await _supabase.from('pcb_posts').delete().eq('user_id', userId);
           } catch (_) {}
@@ -114,22 +126,29 @@ class _AdminControlUserScreenState extends State<AdminControlUserScreen> {
             await _supabase.from('pcb_comments').delete().eq('user_id', userId);
           } catch (_) {}
           try {
-            await _supabase.from('pcblive_streams').delete().eq('host_user_id', userId);
+            await _supabase.from('doctor_notifications').delete().eq('user_id', userId);
           } catch (_) {}
         }
 
-        await _supabase.from('pcb').delete().eq('id', profileId);
+        // 3. Delete main profile row
+        if (profileId != null && profileId.isNotEmpty) {
+          await _supabase.from('pcb').delete().eq('id', profileId);
+        }
 
         if (mounted) {
           Navigator.pop(context);
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("User and all associated data deleted completely"), backgroundColor: Colors.green),
+            const SnackBar(
+              content: Text("User profile and Cloudinary images deleted successfully!"),
+              backgroundColor: Colors.green,
+            ),
           );
           _fetchUsers();
         }
       } catch (e) {
         if (mounted) {
           Navigator.pop(context);
+          debugPrint("Error deleting user: $e");
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text("Error deleting user: $e"), backgroundColor: Colors.red),
           );
@@ -138,10 +157,52 @@ class _AdminControlUserScreenState extends State<AdminControlUserScreen> {
     }
   }
 
+  // --- Helper: Extract Public ID & Delete from Cloudinary ---
+  Future<void> _deleteFromCloudinary(String url) async {
+    try {
+      if (!url.contains('cloudinary.com')) return;
+
+      final uri = Uri.parse(url);
+      final segments = uri.pathSegments;
+      final uploadIndex = segments.indexOf('upload');
+      if (uploadIndex == -1 || uploadIndex + 1 >= segments.length) return;
+
+      String resourceType = 'image';
+      if (segments.contains('video') || url.contains('/video/')) {
+        resourceType = 'video';
+      }
+
+      int startIndex = uploadIndex + 1;
+      if (segments[startIndex].startsWith('v') && RegExp(r'^v\d+$').hasMatch(segments[startIndex])) {
+        startIndex++;
+      }
+
+      final fullPath = segments.sublist(startIndex).join('/');
+      final dotIndex = fullPath.lastIndexOf('.');
+      final publicId = dotIndex != -1 ? fullPath.substring(0, dotIndex) : fullPath;
+
+      debugPrint("Deleting Cloudinary asset: $publicId ($resourceType)");
+
+      // Invoke the deployed 'delete-image' Supabase Edge Function
+      final response = await _supabase.functions.invoke(
+        'delete-image',
+        body: {
+          'public_id': publicId,
+          'resource_type': resourceType,
+        },
+      );
+
+      debugPrint("Cloudinary edge delete response: ${response.data}");
+
+    } catch (e) {
+      debugPrint("Cloudinary delete helper error: $e");
+    }
+  }
+
   // Helper to open and manage/edit the user's posts
   Future<void> _openUserPosts(Map<String, dynamic> user) async {
-    final profileId = user['id'];
-    final userId = user['user_id'];
+    final profileId = user['id']?.toString();
+    final userId = user['user_id']?.toString();
 
     showDialog(
       context: context,
@@ -150,14 +211,21 @@ class _AdminControlUserScreenState extends State<AdminControlUserScreen> {
     );
 
     try {
-      // Fetch posts belonging to this user
-      final postsResponse = await _supabase
-          .from('pcb_posts')
-          .select()
-          .or('user_id.eq.$profileId,user_id.eq.$userId');
+      // Safely build an or filter matching either profile id or user_id
+      var query = _supabase.from('pcb_posts').select();
+
+      if (profileId != null && userId != null && profileId != userId) {
+        query = query.or('user_id.eq.$profileId,user_id.eq.$userId');
+      } else if (userId != null && userId.isNotEmpty) {
+        query = query.eq('user_id', userId);
+      } else if (profileId != null && profileId.isNotEmpty) {
+        query = query.eq('user_id', profileId);
+      }
+
+      final postsResponse = await query.order('created_at', ascending: false);
 
       if (context.mounted) {
-        Navigator.pop(context); // Pop loader
+        Navigator.pop(context); // Pop loading dialog
 
         showModalBottomSheet(
           context: context,
@@ -199,10 +267,13 @@ class _AdminControlUserScreenState extends State<AdminControlUserScreen> {
                         itemCount: posts.length,
                         itemBuilder: (context, index) {
                           final post = posts[index];
-                          final content = post['content'] ?? post['title'] ?? 'Untitled Post';
-                          final postId = post['id'];
 
-                          // Inside _openUserPosts method -> ListView.builder itemBuilder:
+                          // Fallback check to ensure content displays even if named title or description
+                          final contentValue = post['content'] ?? post['title'] ?? post['description'];
+                          final content = (contentValue != null && contentValue.toString().trim().isNotEmpty)
+                              ? contentValue.toString()
+                              : 'Untitled Post';
+
                           return Card(
                             margin: const EdgeInsets.only(bottom: 10),
                             child: ListTile(
@@ -210,7 +281,6 @@ class _AdminControlUserScreenState extends State<AdminControlUserScreen> {
                               trailing: IconButton(
                                 icon: const Icon(Icons.edit, color: Colors.blue),
                                 onPressed: () async {
-                                  // 🚀 ADD IT HERE: Navigate to your full EditPostScreen
                                   final updated = await Navigator.push(
                                     context,
                                     MaterialPageRoute(
@@ -218,9 +288,8 @@ class _AdminControlUserScreenState extends State<AdminControlUserScreen> {
                                     ),
                                   );
 
-                                  // If the post was successfully updated, close the bottom sheet and refresh
                                   if (updated == true && context.mounted) {
-                                    Navigator.pop(context); // Close the posts bottom sheet
+                                    Navigator.pop(context); // Close sheet
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       const SnackBar(
                                         content: Text("Post updated successfully!"),
@@ -245,6 +314,7 @@ class _AdminControlUserScreenState extends State<AdminControlUserScreen> {
     } catch (e) {
       if (context.mounted) {
         Navigator.pop(context);
+        debugPrint("Error fetching user posts: $e");
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text("Error fetching posts: $e"), backgroundColor: Colors.red),
         );
@@ -263,7 +333,6 @@ class _AdminControlUserScreenState extends State<AdminControlUserScreen> {
       ),
       body: Column(
         children: [
-          // Search Header
           Container(
             padding: const EdgeInsets.all(16),
             color: Colors.blueAccent.withOpacity(0.05),
@@ -300,8 +369,6 @@ class _AdminControlUserScreenState extends State<AdminControlUserScreen> {
               ),
             ),
           ),
-
-          // User Count Subheader
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
             child: Row(
@@ -319,8 +386,6 @@ class _AdminControlUserScreenState extends State<AdminControlUserScreen> {
               ],
             ),
           ),
-
-          // Main User List
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator.adaptive())
@@ -430,7 +495,6 @@ class _AdminControlUserScreenState extends State<AdminControlUserScreen> {
                               }
                             }
                           } else if (value == 'edit_posts') {
-                            // 🚀 Opens the user's posts for editing
                             _openUserPosts(user);
                           } else if (value == 'delete') {
                             _deleteUser(user);
@@ -457,7 +521,6 @@ class _AdminControlUserScreenState extends State<AdminControlUserScreen> {
                               ],
                             ),
                           ),
-                          // 🚀 Added Edit Posts Button Here
                           const PopupMenuItem(
                             value: 'edit_posts',
                             child: Row(

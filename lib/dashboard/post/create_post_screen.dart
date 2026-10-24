@@ -1,12 +1,12 @@
 import 'dart:io';
 import 'package:pharmacist_profile/dashboard/post/emogi.dart';
-import 'package:pharmacist_profile/dashboard/post/image_reels.dart';
-import 'package:pharmacist_profile/dashboard/post/live.dart';
+import 'package:pharmacist_profile/media/image_reels.dart';
+import 'package:pharmacist_profile/media/live.dart';
 import 'package:pharmacist_profile/dashboard/post/location_screen.dart';
 import 'package:pharmacist_profile/dashboard/post/tagg.dart';
-import 'package:pharmacist_profile/dashboard/post/video/video_upload_compress_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
+import 'package:pharmacist_profile/video/video_upload_compress_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
@@ -80,6 +80,77 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     }
   }
 
+  // --- Simple & Clean Image Adjuster Pattern ---
+  Future<void> _openImageAdjuster(File imageFile) async {
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.black,
+      builder: (context) {
+        return SafeArea(
+          child: Container(
+            height: MediaQuery.of(context).size.height * 0.85,
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: () {
+                        setState(() {
+                          _selectedImageFile = imageFile;
+                          _selectedVideoFile = null;
+                        });
+                        Navigator.pop(context);
+                      },
+                      child: const Text(
+                        "Done",
+                        style: TextStyle(
+                          color: Colors.blueAccent,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const Divider(color: Colors.grey),
+                const Spacer(),
+                Center(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Container(
+                      constraints: BoxConstraints(
+                        maxHeight: MediaQuery.of(context).size.height * 0.55,
+                      ),
+                      child: InteractiveViewer(
+                        panEnabled: true,
+                        boundaryMargin: const EdgeInsets.all(20),
+                        minScale: 1.0,
+                        maxScale: 4.0,
+                        child: Image.file(
+                          imageFile,
+                          fit: BoxFit.contain,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const Spacer(),
+                const Text(
+                  "Pinch to zoom & drag to adjust position",
+                  style: TextStyle(color: Colors.grey, fontSize: 13),
+                ),
+                const SizedBox(height: 20),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Future<File?> compressImageToTargetSize(File file, {int targetKb = 50}) async {
     final targetBytes = targetKb * 1024;
     if (await file.length() <= targetBytes) return file;
@@ -126,11 +197,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       return;
     }
 
-    // Graceful remarks instead of raw technical/Postgrest errors
     if (_profileId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("Please complete or create your profile before posting."),
+          content: Text("Please login or create your profile before posting."),
           backgroundColor: Colors.orange,
         ),
       );
@@ -156,7 +226,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         if (uploadedImageUrl == null || uploadedImageUrl.isEmpty) {
           throw "Image upload returned an invalid URL.";
         }
-        mediaType = 'image';
+        mediaType = 'cloud';
       }
 
       if (_selectedVideoFile != null) {
@@ -174,16 +244,30 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         mediaType = 'video';
       }
 
-      await _supabase.from('pcb_posts').insert({
+      // 1. Insert the post into Supabase
+      final postResponse = await _supabase.from('pcb_posts').insert({
         'user_id': _profileId,
         'content': textContent,
         'video_url': mediaType == 'video' ? uploadedVideoUrl : null,
-        'image_url': mediaType == 'image' ? uploadedImageUrl : null,
+        'image_url': mediaType == 'cloud' ? uploadedImageUrl : null,
         'media_url': mediaType == 'video' ? uploadedVideoUrl : uploadedImageUrl,
         'media_type': mediaType,
         'is_published': true,
         'created_at': DateTime.now().toIso8601String(),
-      });
+      }).select().single();
+
+      // 2. 🔔 (Optional) Trigger Notification to Followers or System
+      // If you want to notify followers, you can query their IDs or send a broadcast notification.
+      // For demonstration, if you have a way to notify specific users or groups, you can insert here:
+      try {
+        final authUser = _supabase.auth.currentUser;
+        if (authUser != null && _profileId != null) {
+          // Example: If you want to record a notification or notify connected users
+          debugPrint("✅ Post created successfully, ID: ${postResponse['id']}");
+        }
+      } catch (notifErr) {
+        debugPrint("⚠️ Could not dispatch post notification: $notifErr");
+      }
 
       if (mounted) {
         Navigator.pop(context, true);
@@ -239,6 +323,32 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 setState(() => _audience = "Professionals");
                 Navigator.pop(context);
               },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showFullImage(BuildContext context, String imageUrl) {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        backgroundColor: Colors.black,
+        insetPadding: EdgeInsets.zero,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            InteractiveViewer(
+              child: Image.network(imageUrl, fit: BoxFit.contain),
+            ),
+            Positioned(
+              top: 40,
+              right: 20,
+              child: IconButton(
+                icon: const Icon(Icons.close, color: Colors.white, size: 30),
+                onPressed: () => Navigator.pop(context),
+              ),
             ),
           ],
         ),
@@ -373,13 +483,16 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                       const SizedBox(height: 15),
                       Stack(
                         children: [
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(12),
-                            child: Image.file(
-                              _selectedImageFile!,
-                              height: 200,
-                              width: double.infinity,
-                              fit: BoxFit.cover,
+                          GestureDetector(
+                            onTap: () => _showFullImage(context, _selectedImageFile! as String),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: Image.file(
+                                _selectedImageFile!,
+                                height: 200,
+                                width: double.infinity,
+                                fit: BoxFit.cover,
+                              ),
                             ),
                           ),
                           Positioned(
@@ -474,8 +587,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                           showImageSourceSelector(
                             context,
                             onImageSelected: (file) {
+
                               setState(() {
-                                _selectedImageFile = file;
+                                _openImageAdjuster(file);
                                 _selectedVideoFile = null;
                               });
                             },

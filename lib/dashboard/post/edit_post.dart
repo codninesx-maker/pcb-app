@@ -1,10 +1,10 @@
 import 'dart:io';
-import 'package:pharmacist_profile/image/cloudinary_service.dart';
+import 'package:pharmacist_profile/cloud/cloudinary_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'emogi.dart'; // Make sure this points to your emoji picker widget file
-import 'image_reels.dart'; // Ensure this points to your image/video source picker utility
+import '../../media/image_reels.dart'; // Ensure this points to your cloud/video source picker utility
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 
@@ -143,7 +143,7 @@ class _EditPostScreenState extends State<EditPostScreen> {
       // Look up old media URL across all possible fields
       final String? oldMediaUrl = widget.post['media_url'] ?? widget.post['image_url'] ?? widget.post['video_url'];
 
-      // Helper function to safely trigger deletion handling video/image resource types
+      // Helper function to safely trigger deletion handling video/cloud resource types
       Future<void> deleteOldMedia(String url) async {
         try {
           // If your CloudinaryService handles videos/images internally via URL:
@@ -158,7 +158,7 @@ class _EditPostScreenState extends State<EditPostScreen> {
         File? compressedFile = await compressImageToTargetSize(_selectedNewImageFile!, targetKb: 100);
         finalMediaUrl = await _cloudinaryService.uploadImage(compressedFile ?? _selectedNewImageFile!);
 
-        if (finalMediaUrl == null) throw Exception("Failed to upload new image.");
+        if (finalMediaUrl == null) throw Exception("Failed to upload new cloud.");
 
         if (oldMediaUrl != null && oldMediaUrl.isNotEmpty) {
           await deleteOldMedia(oldMediaUrl);

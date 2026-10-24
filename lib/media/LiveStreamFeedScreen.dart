@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:pharmacist_profile/dashboard/post/Liveplaceholder.dart';
-import 'package:pharmacist_profile/dashboard/post/live.dart';
+import 'package:pharmacist_profile/media/Liveplaceholder.dart';
+import 'package:pharmacist_profile/media/live.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 

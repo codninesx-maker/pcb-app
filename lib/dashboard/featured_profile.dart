@@ -1,8 +1,10 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:pharmacist_profile/profile/view_profile_detail_screen.dart';
 
-
-class FeaturedprofilesSection extends StatelessWidget {
+class FeaturedprofilesSection extends StatefulWidget {
   final Future<List<Map<String, dynamic>>> profileFuture;
   final VoidCallback onprofileReturned;
 
@@ -11,6 +13,48 @@ class FeaturedprofilesSection extends StatelessWidget {
     required this.profileFuture,
     required this.onprofileReturned,
   });
+
+  @override
+  State<FeaturedprofilesSection> createState() => _FeaturedprofilesSectionState();
+}
+
+class _FeaturedprofilesSectionState extends State<FeaturedprofilesSection> {
+  static const String _cachedProfilesKey = 'cached_featured_profiles';
+  late Future<List<Map<String, dynamic>>> _combinedFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _combinedFuture = _fetchWithOfflineFallback();
+  }
+
+  @override
+  void didUpdateWidget(covariant FeaturedprofilesSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.profileFuture != widget.profileFuture) {
+      setState(() {
+        _combinedFuture = _fetchWithOfflineFallback();
+      });
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchWithOfflineFallback() async {
+    final prefs = await SharedPreferences.getInstance();
+    try {
+      final profiles = await widget.profileFuture;
+      if (profiles.isNotEmpty) {
+        await prefs.setString(_cachedProfilesKey, jsonEncode(profiles));
+      }
+      return profiles;
+    } catch (e) {
+      final cachedString = prefs.getString(_cachedProfilesKey);
+      if (cachedString != null) {
+        final List<dynamic> decoded = jsonDecode(cachedString);
+        return decoded.map((item) => Map<String, dynamic>.from(item)).toList();
+      }
+      rethrow;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -24,16 +68,25 @@ class FeaturedprofilesSection extends StatelessWidget {
         ),
         const SizedBox(height: 15),
         FutureBuilder<List<Map<String, dynamic>>>(
-          future: profileFuture,
+          future: _combinedFuture,
           builder: (context, snapshot) {
-            if (!snapshot.hasData) return const SizedBox();
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const SizedBox(
+                height: 180,
+                child: Center(child: CircularProgressIndicator()),
+              );
+            }
+
+            if (snapshot.hasError || !snapshot.hasData) {
+              return const SizedBox();
+            }
 
             final featuredprofile = snapshot.data!
                 .where((d) => d['is_featured'] == true)
                 .toList()
               ..sort((a, b) {
-                final aDate = DateTime.tryParse(a['created_at'] ?? '') ?? DateTime(0);
-                final bDate = DateTime.tryParse(b['created_at'] ?? '') ?? DateTime(0);
+                final aDate = DateTime.tryParse(a['created_at']?.toString() ?? '') ?? DateTime(0);
+                final bDate = DateTime.tryParse(b['created_at']?.toString() ?? '') ?? DateTime(0);
                 return bDate.compareTo(aDate);
               });
 
@@ -46,6 +99,8 @@ class FeaturedprofilesSection extends StatelessWidget {
                 itemCount: featuredprofile.length,
                 itemBuilder: (context, index) {
                   final profile = featuredprofile[index];
+                  final imageUrl = profile['image_url'];
+
                   return GestureDetector(
                     onTap: () async {
                       await Navigator.push(
@@ -54,7 +109,7 @@ class FeaturedprofilesSection extends StatelessWidget {
                           builder: (context) => profileDetailScreen(profile: profile),
                         ),
                       );
-                      onprofileReturned();
+                      widget.onprofileReturned();
                     },
                     child: Container(
                       width: 140,
@@ -74,8 +129,8 @@ class FeaturedprofilesSection extends StatelessWidget {
                         children: [
                           CircleAvatar(
                             radius: 40,
-                            backgroundImage: profile['image_url'] != null
-                                ? NetworkImage(profile['image_url'])
+                            backgroundImage: (imageUrl != null && imageUrl.toString().isNotEmpty)
+                                ? CachedNetworkImageProvider(imageUrl.toString()) as ImageProvider
                                 : const NetworkImage('https://i.pravatar.cc/150'),
                           ),
                           const SizedBox(height: 10),

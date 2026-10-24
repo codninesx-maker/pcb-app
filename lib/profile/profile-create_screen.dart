@@ -3,7 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:pharmacist_profile/admobs/ads_test_banner.dart';
-import 'package:pharmacist_profile/image/cloudinary_service.dart';
+import 'package:pharmacist_profile/dashboard/fblike_Image_adjuster_screen.dart';
+import 'package:pharmacist_profile/cloud/cloudinary_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class profileCreateScreen extends StatefulWidget {
@@ -36,7 +37,7 @@ class _profileCreateScreenState extends State<profileCreateScreen> {
   final List<String> _phoneVisibilityOptions = ["Public", "Private"];
 
   File? _imageFile;
-  File? _coverFile; // Added cover image file state
+  File? _coverFile; // Added cover cloud file state
   bool _isLoading = false;
   bool _isOtpSent = false;
   bool _isVerifyingPcb = false;
@@ -129,34 +130,24 @@ class _profileCreateScreenState extends State<profileCreateScreen> {
   }
 
   // Updated Image Picker with Policy Dialog, Gallery/Camera choice, and Size Validation
-  Future<void> _pickAndValidateMedia({bool isCover = false}) async {
-    final bool? shouldProceed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Media Upload Policy"),
-        content: const Text(
-          "Strictly prohibited: Nudity, sexually explicit content, adult material, or violence. "
-              "All uploads are automatically scanned by AI moderation. Violating accounts will be banned.\n\nDo you wish to proceed?",
+  Future<void> _openFacebookStyleAndSave(File imageFile, bool isCover) async {
+    final File? adjustedFile = await Navigator.push<File>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => FacebookImageAdjusterScreen(
+          imageFile: imageFile,
+          isCover: isCover,
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text("Cancel"),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text("I Agree", style: TextStyle(color: Colors.white)),
-          ),
-        ],
       ),
     );
 
-    if (shouldProceed != true) return;
+    if (adjustedFile != null) {
+      await _validateAndSetFile(adjustedFile, isCover);
+    }
+  }
 
-    if (!mounted) return;
-
-    // Show Bottom Sheet to choose between Gallery or Camera
+  // --- Updated Image Picker ---
+  Future<void> _pickAndValidateMedia({bool isCover = false}) async {
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
@@ -180,11 +171,10 @@ class _profileCreateScreenState extends State<profileCreateScreen> {
                 Navigator.pop(sheetContext);
                 final XFile? pickedFile = await _imagePicker.pickImage(
                   source: ImageSource.gallery,
-                  imageQuality: 70,
-                  maxWidth: isCover ? 1200 : 800,
+                  imageQuality: 90,
                 );
                 if (pickedFile != null) {
-                  _validateAndSetFile(File(pickedFile.path), isCover);
+                  await _openFacebookStyleAndSave(File(pickedFile.path), isCover);
                 }
               },
             ),
@@ -195,11 +185,10 @@ class _profileCreateScreenState extends State<profileCreateScreen> {
                 Navigator.pop(sheetContext);
                 final XFile? pickedFile = await _imagePicker.pickImage(
                   source: ImageSource.camera,
-                  imageQuality: 70,
-                  maxWidth: isCover ? 1200 : 800,
+                  imageQuality: 90,
                 );
                 if (pickedFile != null) {
-                  _validateAndSetFile(File(pickedFile.path), isCover);
+                  await _openFacebookStyleAndSave(File(pickedFile.path), isCover);
                 }
               },
             ),
@@ -209,9 +198,9 @@ class _profileCreateScreenState extends State<profileCreateScreen> {
     );
   }
 
-  // Helper to validate size and update state
   Future<void> _validateAndSetFile(File file, bool isCover) async {
     final fileSize = await file.length();
+    // ✅ Fixed corrupted size validation syntax
     if (fileSize > 5 * 1024 * 1024) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -598,11 +587,10 @@ class _profileCreateScreenState extends State<profileCreateScreen> {
                 "Bio",
                 _aboutController,
                 maxLines: 4,
-                maxLength: 130, // Limits characters so it stays concise and shows fully
-                icon: Icons.info_outline,
+                maxLength: 188, // Limits characters so it stays concise and shows fully
                 validator: (value) {
-                  if (value != null && value.length > 130) {
-                    return "Bio cannot exceed 130 characters";
+                  if (value != null && value.length > 188) {
+                    return "Bio cannot exceed 188 characters";
                   }
                   return null;
                 },

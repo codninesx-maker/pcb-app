@@ -11,11 +11,15 @@ import 'package:url_launcher/url_launcher.dart';
 class Likecommentshare extends StatefulWidget {
   final Map<String, dynamic> post;
   final Function(int newCount, bool isLiked)? onReactionChanged;
+  final Function(int newSharesCount)? onShareChanged;
+  final Function(int newCommentsCount)? onCommentChanged;
 
   const Likecommentshare({
     super.key,
     required this.post,
     this.onReactionChanged,
+    this.onShareChanged,
+    this.onCommentChanged,
   });
 
   @override
@@ -62,6 +66,77 @@ class _LikecommentshareState extends State<Likecommentshare> with AutomaticKeepA
     });
   }
 
+  // --- GENERIC NOTIFICATION HELPER ---
+  Future<void> _sendNotification({
+    required String type,      // 'like', 'comment', or 'share'
+    required String bodyText,  // e.g. 'liked your post.'
+  }) async {
+    final currentUserId = Supabase.instance.client.auth.currentUser?.id;
+    if (currentUserId == null || currentUserId.isEmpty) {
+      debugPrint("❌ Notification Error: No logged-in user found.");
+      return;
+    }
+
+    // Resolves post owner ID with fallbacks
+    final postOwnerUserId = widget.post['user_id']?.toString() ??
+        widget.post['pcb_id']?.toString() ??
+        widget.post['author_id']?.toString();
+
+    if (postOwnerUserId == null || postOwnerUserId.isEmpty) {
+      debugPrint("❌ Notification Error: Post owner user_id is missing or empty.");
+      return;
+    }
+
+    debugPrint("🔍 Notification check: Actor ($currentUserId) -> Post Owner ($postOwnerUserId)");
+
+    // Do not notify if user interacts with their own post
+    if (postOwnerUserId != currentUserId) {
+      try {
+        String actorName = 'Someone';
+        String? actorAvatar;
+
+        // Fetch current user's profile details safely
+        try {
+          final userProfile = await Supabase.instance.client
+              .from('pcb')
+              .select('name, image_url')
+              .eq('user_id', currentUserId)
+              .maybeSingle();
+
+          if (userProfile != null) {
+            actorName = userProfile['name'] ?? 'Someone';
+            actorAvatar = userProfile['image_url'];
+          }
+        } catch (profileErr) {
+          debugPrint("⚠️ Warning: Could not fetch actor profile: $profileErr");
+        }
+
+        final payload = {
+          'user_id': postOwnerUserId,   // Recipient post owner
+          'actor_id': currentUserId,    // Current actor
+          'actor_avatar': actorAvatar,
+          'title': actorName,
+          'body': bodyText,
+          'type': type,
+          'is_read': false,
+        };
+
+        debugPrint("📤 Inserting notification payload: $payload");
+
+        final response = await Supabase.instance.client
+            .from('pcb_notifications')
+            .insert(payload)
+            .select();
+
+        debugPrint("✅ Notification inserted successfully! Response: $response");
+      } catch (e) {
+        debugPrint("❌ CRITICAL Error inserting $type notification: $e");
+      }
+    } else {
+      debugPrint("ℹ️ Skipping notification: User interacted with their own post.");
+    }
+  }
+
   @override
   void didUpdateWidget(covariant Likecommentshare oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -82,289 +157,138 @@ class _LikecommentshareState extends State<Likecommentshare> with AutomaticKeepA
 
     final post = widget.post;
 
-    // --- MEDIA PARSING LOGIC ---
-    final String? mediaUrl = post['media_url'] ?? post['video_url'] ??
-        post['image_url'];
-    final String? mediaType = post['media_type'];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Divider(height: 1, thickness: 0.5),
+        const SizedBox(height: 4),
 
-    bool isVideo = mediaType == 'video' ||
-        (mediaUrl != null &&
-            (mediaUrl.endsWith('.mp4') || mediaUrl.contains('/video/')));
-
-    bool isImage = mediaType == 'image' ||
-        (mediaUrl != null && !isVideo);
-
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      elevation: 1,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(12.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
+        // --- LIKE, COMMENT, SHARE ACTION BAR ---
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
-            // --- 1. POST HEADER ---
-            // --- 1. POST HEADER ---
-            GestureDetector(
-              onTap: () async {
-                final String? authorUserId = post['user_id'];
-                if (authorUserId == null || authorUserId.isEmpty) return;
+            // --- Like Reaction Button ---
+            FacebookReactionButton(
+              post: post,
+              onReactionChanged: (newLikeCount, isLiked) {
+                setState(() {
+                  _likesCount = newLikeCount;
+                  _isLiked = isLiked;
+                  post['likes_count'] = newLikeCount;
+                });
 
-                // Show loading indicator while fetching author's profile
-                showDialog(
-                  context: context,
-                  barrierDismissible: false,
-                  builder: (context) => const Center(child: CircularProgressIndicator.adaptive()),
-                );
+                if (widget.onReactionChanged != null) {
+                  widget.onReactionChanged!(newLikeCount, isLiked);
+                }
 
-                try {
-                  // Query the 'pcb' table for this specific user's profile
-                  final profileData = await Supabase.instance.client
-                      .from('pcb')
-                      .select()
-                      .eq('user_id', authorUserId)
-                      .maybeSingle();
+                debugPrint("❤️ Like button toggled! isLiked: $isLiked");
 
-                  if (!context.mounted) return;
-                  Navigator.pop(context); // Dismiss loading dialog
-
-                  if (profileData != null) {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => profileDetailScreen(profile: profileData),
-                      ),
-                    );
-                  } else {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text("This user hasn't created a professional profile yet.")),
-                    );
-                  }
-                } catch (e) {
-                  if (!context.mounted) return;
-                  Navigator.pop(context); // Dismiss loading dialog
-                  debugPrint("Error loading author profile: $e");
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text("Error loading profile: $e"), backgroundColor: Colors.red),
+                if (isLiked) {
+                  _sendNotification(
+                    type: 'like',
+                    bodyText: 'liked your post.',
                   );
                 }
               },
-              child: Row(
-                children: [
-                  CircleAvatar(
-                    radius: 20,
-                    backgroundImage: post['user_avatar'] != null
-                        ? NetworkImage(post['user_avatar'])
-                        : null,
-                    child: post['user_avatar'] == null
-                        ? const Icon(Icons.person)
-                        : null,
+            ),
+
+            // --- Comment Button ---
+            TextButton.icon(
+              onPressed: () {
+                _sendNotification(
+                  type: 'comment',
+                  bodyText: 'commented on your post.',
+                );
+
+                showModalBottomSheet(
+                  context: context,
+                  isScrollControlled: true,
+                  backgroundColor: Colors.white,
+                  shape: const RoundedRectangleBorder(
+                    borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      post['user_name'] ?? 'User',
-                      style: const TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 15),
+                  builder: (context) => Padding(
+                    padding: EdgeInsets.only(
+                      bottom: MediaQuery.of(context).viewInsets.bottom,
+                    ),
+                    child: DraggableScrollableSheet(
+                      initialChildSize: 0.6,
+                      minChildSize: 0.3,
+                      maxChildSize: 0.9,
+                      expand: false,
+                      builder: (context, scrollController) => CommentsBottomSheet(
+                        postId: post['id'],
+                        scrollController: scrollController,
+                        postOwnerId: post['user_id'],
+                      ),
                     ),
                   ),
-                ],
+                );
+              },
+              icon: const Icon(Icons.chat_bubble_outline, size: 16, color: Colors.grey),
+              label: Text(
+                _commentsCount > 0 ? "$_commentsCount" : "Comment",
+                style: const TextStyle(color: Colors.grey, fontSize: 13, fontWeight: FontWeight.w600),
               ),
             ),
-            const SizedBox(height: 10),
 
-            // --- 2. POST CONTENT ---
-            if (post['content'] != null && post['content'].toString().isNotEmpty) ...[
-              Linkify(
-                onOpen: (link) async {
-                  String urlString = link.url;
-                  if (!urlString.startsWith('http://') && !urlString.startsWith('https://')) {
-                    urlString = 'https://$urlString';
-                  }
-                  final Uri url = Uri.parse(urlString);
-                  try {
-                    if (await canLaunchUrl(url)) {
-                      await launchUrl(url, mode: LaunchMode.externalApplication);
-                    } else {
-                      debugPrint('Could not launch $urlString');
-                    }
-                  } catch (e) {
-                    debugPrint('Error launching link: $e');
-                  }
-                },
-                text: post['content'],
-                style: const TextStyle(
-                  fontSize: 14,
-                  color: Colors.black87,
-                  height: 1.4,
-                ),
-                linkStyle: const TextStyle(
-                  color: Colors.blueAccent,
-                  fontWeight: FontWeight.w600,
-                  decoration: TextDecoration.underline,
-                ),
-              ),
-              const SizedBox(height: 10),
-            ],
+            // --- Share Button ---
+            TextButton.icon(
+              onPressed: () async {
+                final supabase = Supabase.instance.client;
+                final String postId = post['id'].toString();
+                final String postLink = "https://codninesx-maker.github.io/pcb-app/#/post/$postId";
+                final String shareContent = "Check this out on Pcb App. Click to view the post instantly:\n$postLink";
 
-            // --- 3. MEDIA RENDERING (IMAGE OR VIDEO) ---
-            if (mediaUrl != null && mediaUrl.isNotEmpty) ...[
-              GestureDetector(
-                onTap: () {
-                  if (!isVideo) {
-                    // Show full screen image when tapped
-                    _showFullImage(context, mediaUrl);
-                  } else {
-                    // Optional: handle video full screen or playback if needed
-                  }
-                },
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: Container(
-                    constraints: const BoxConstraints(maxHeight: 300),
-                    width: double.infinity,
-                    color: Colors.black12,
-                    child: isVideo
-                        ? Container(
-                      height: 200,
-                      alignment: Alignment.center,
-                      color: Colors.black,
-                      child: const Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.play_circle_fill, color: Colors.white, size: 50),
-                          SizedBox(height: 8),
-                          Text("Video Content", style: TextStyle(color: Colors.white70, fontSize: 12)),
-                        ],
-                      ),
-                    )
-                        : Image.network(
-                      mediaUrl,
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) =>
-                      const Padding(
-                        padding: EdgeInsets.all(16.0),
-                        child: Text("Could not load media", style: TextStyle(color: Colors.grey)),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-            ],
+                // 1. Optimistic UI update
+                setState(() {
+                  _sharesCount++;
+                  post['shares_count'] = _sharesCount;
+                });
 
-            const Divider(height: 1, thickness: 0.5),
-            const SizedBox(height: 4),
+                if (widget.onShareChanged != null) {
+                  widget.onShareChanged!(_sharesCount);
+                }
 
-            // --- 4. LIKE, COMMENT, SHARE ACTION BAR ---
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: [
-                // --- Like Button ---
-                FacebookReactionButton(
-                  post: post,
-                  onReactionChanged: (newLikeCount, isLiked) {
-                    setState(() {
-                      _likesCount = newLikeCount;
-                      _isLiked = isLiked;
-                      post['likes_count'] = newLikeCount;
-                    });
-                  },
-                ),
+                // 2. Trigger Share Notification to post owner
+                await _sendNotification(
+                  type: 'share',
+                  bodyText: 'shared your post.',
+                );
 
-                // --- Comment Button ---
-                TextButton.icon(
-                  onPressed: () {
-                    showModalBottomSheet(
-                      context: context,
-                      isScrollControlled: true,
-                      backgroundColor: Colors.white,
-                      shape: const RoundedRectangleBorder(
-                        borderRadius: BorderRadius.vertical(
-                            top: Radius.circular(20)),
-                      ),
-                      builder: (context) =>
-                          Padding(
-                            padding: EdgeInsets.only(
-                              bottom: MediaQuery
-                                  .of(context)
-                                  .viewInsets
-                                  .bottom,
-                            ),
-                            child: DraggableScrollableSheet(
-                              initialChildSize: 0.6,
-                              minChildSize: 0.3,
-                              maxChildSize: 0.9,
-                              expand: false,
-                              builder: (context, scrollController) =>
-                                  CommentsBottomSheet(
-                                    postId: post['id'],
-                                    scrollController: scrollController,
-                                    postOwnerId: post['user_id'],
-                                  ),
-                            ),
-                          ),
+                // 3. Persist updated share count in Supabase DB
+                try {
+                  await supabase
+                      .from('pcb_posts')
+                      .update({'shares_count': _sharesCount})
+                      .eq('id', postId);
+                  debugPrint("✅ Share count persisted in database: $_sharesCount");
+                } catch (e) {
+                  debugPrint("❌ Error updating share count in DB: $e");
+                }
+
+                // 4. Open native platform share sheet
+                try {
+                  await Share.share(shareContent);
+                } catch (e) {
+                  debugPrint("❌ Error opening share sheet: $e");
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text("Could not open share sheet")),
                     );
-                  },
-                  icon: const Icon(
-                      Icons.chat_bubble_outline, size: 16, color: Colors.grey),
-                  label: Text(
-                    _commentsCount > 0 ? "$_commentsCount" : "Comment",
-                    style: const TextStyle(
-                      color: Colors.grey,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-
-                // --- Share Button ---
-                TextButton.icon(
-                  onPressed: () async {
-                    final String postLink = "https://codninesx-maker.github.io/pcb-app/#/post/${post['id']}";
-                    final String shareContent = "Check this out on PCB App. Click to view the post instantly:\n$postLink";
-
-                    setState(() {
-                      _sharesCount++;
-                      post['shares_count'] = _sharesCount;
-                    });
-
-                    try {
-                      await Supabase.instance.client
-                          .from('pcb_posts')
-                          .update({'shares_count': _sharesCount})
-                          .eq('id', post['id']);
-                    } catch (e) {
-                      debugPrint("Error updating shares: $e");
-                    }
-
-                    try {
-                      await Share.share(shareContent);
-                    } catch (e) {
-                      debugPrint("Error launching external share: $e");
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                            content: Text("Could not open share sheet")),
-                      );
-                    }
-                  },
-                  icon: const Icon(
-                      Icons.share_outlined, size: 16, color: Colors.grey),
-                  label: Text(
-                    _sharesCount > 0 ? "$_sharesCount" : "Share",
-                    style: const TextStyle(
-                      color: Colors.grey,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
-            ),
+                  }
+                }
+              },
+              icon: const Icon(Icons.share_outlined, size: 16, color: Colors.grey),
+              label: Text(
+                _sharesCount > 0 ? "$_sharesCount" : "Share",
+                style: const TextStyle(color: Colors.grey, fontSize: 13, fontWeight: FontWeight.w600),
+              ),
+            )
           ],
         ),
-      ),
+      ],
     );
   }
 

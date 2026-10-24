@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
@@ -9,12 +10,15 @@ import 'package:pharmacist_profile/dashboard/featured_profile.dart';
 import 'package:pharmacist_profile/dashboard/post/create_post_screen.dart';
 import 'package:pharmacist_profile/dashboard/profile_list_five_connected_dash.dart';
 import 'package:pharmacist_profile/dashboard/search_bar.dart';
-import 'package:pharmacist_profile/dashboard/three_dot_menu.dart';
+import 'package:pharmacist_profile/threedot/three_dot_menu.dart';
+import 'package:pharmacist_profile/notifications/FlutterNotificationService.dart';
+import 'package:pharmacist_profile/notifications/NotificationBellButton.dart';
 import 'package:pharmacist_profile/profile/profile-create_screen.dart';
 import 'package:pharmacist_profile/profile/view_profile_detail_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../image/cloudinary_service.dart';
-import 'chat_screen.dart';
+import '../cloud/cloudinary_service.dart';
+import '../chat/chat_screen.dart';
 
 
 class DashboardViewScreen extends StatefulWidget {
@@ -45,6 +49,11 @@ class _DashboardViewScreenState extends State<DashboardViewScreen> {
   final _cloudinary = CloudinaryService();
   late final RealtimeChannel _postsChannel;
 
+  // Local cache keys
+  static const String _cachedProfilesKey = 'cached_profiles_data';
+  static const String _cachedPostsKey = 'cached_posts_data';
+  static const String _cachedAnnouncementKey = 'cached_announcement_text';
+
   @override
   void initState() {
     super.initState();
@@ -52,10 +61,15 @@ class _DashboardViewScreenState extends State<DashboardViewScreen> {
     _listenToAuthChanges();
     _listenToAnnouncements();
     _setupPostsRealtime();
+    final currentUserId = Supabase.instance.client.auth.currentUser?.id;
+    if (currentUserId != null) {
+      NotificationService.listenToUserNotifications(currentUserId);
+    }
   }
 
   @override
   void dispose() {
+    NotificationService.dispose();
     _authSubscription.cancel();
     _announcementSubscription.cancel();
     _searchController.dispose();
@@ -133,6 +147,16 @@ class _DashboardViewScreenState extends State<DashboardViewScreen> {
     });
   }
 
+  Future<void> _loadCachedAnnouncement() async {
+    final prefs = await SharedPreferences.getInstance();
+    final cachedText = prefs.getString(_cachedAnnouncementKey);
+    if (cachedText != null && mounted) {
+      setState(() {
+        _announcementText = cachedText;
+      });
+    }
+  }
+
   void _loadInterstitialAd() {
     InterstitialAd.load(
       adUnitId: 'ca-app-pub-7494179033430216/4636802475',
@@ -178,12 +202,52 @@ class _DashboardViewScreenState extends State<DashboardViewScreen> {
 
   Future<void> _initializeAllData() async {
     setState(() => _isLoading = true);
+    // Load local cache immediately for instant offline viewing
+    await _loadLocalCache();
+
     await _initializeUserAndData();
     if (mounted) {
       setState(() => _isLoading = false);
     }
     _listenToAnnouncements();
     _loadInterstitialAd();
+  }
+
+  Future<void> _loadLocalCache() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    // Load cached profiles
+    final cachedProfilesString = prefs.getString(_cachedProfilesKey);
+    if (cachedProfilesString != null) {
+      try {
+        final List<dynamic> decoded = jsonDecode(cachedProfilesString);
+        final List<Map<String, dynamic>> profiles = decoded.map((e) => Map<String, dynamic>.from(e)).toList();
+        setState(() {
+          _profileFuture = Future.value(profiles);
+        });
+      } catch (_) {}
+    }
+
+    // Load cached posts
+    final cachedPostsString = prefs.getString(_cachedPostsKey);
+    if (cachedPostsString != null) {
+      try {
+        final List<dynamic> decoded = jsonDecode(cachedPostsString);
+        final List<Map<String, dynamic>> posts = decoded.map((e) => Map<String, dynamic>.from(e)).toList();
+        setState(() {
+          _postsFuture = Future.value(posts);
+        });
+      } catch (_) {}
+    }
+
+    await _loadCachedAnnouncement();
+  }
+
+  Future<void> _cacheData(String key, dynamic data) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(key, jsonEncode(data));
+    } catch (_) {}
   }
 
   Future<void> _initializeUserAndData() async {
@@ -222,29 +286,49 @@ class _DashboardViewScreenState extends State<DashboardViewScreen> {
     try {
       final currentUserId = Supabase.instance.client.auth.currentUser?.id;
 
+      // Fetch posts with explicit profile join
       final data = await Supabase.instance.client
           .from('pcb_posts')
           .select('''
-            id,
-            content,
-            image_url,
-            video_url,
-            media_type,
-            media_url,
-            created_at,
-            user_id,
-            likes_count,
-            comments_count,
-            shares_count,
-            liked_by,
-            pcb!pcb_posts_user_id_fkey (name, image_url)
-          ''')
+          *,
+          pcb!pcb_posts_user_id_fkey (name, image_url)
+        ''')
           .order('created_at', ascending: false);
 
       final List<Map<String, dynamic>> processedPosts = data.map((post) {
         final Map<String, dynamic> mutablePost = Map<String, dynamic>.from(post);
-        final String likedByString = mutablePost['liked_by']?.toString() ?? '';
 
+        // Extract author details safely from the joined 'pcb' relation map
+        final authorData = mutablePost['pcb'];
+        if (authorData is Map) {
+          mutablePost['user_name'] = authorData['name'] ?? 'Professional';
+          mutablePost['user_avatar'] = authorData['image_url'];
+        } else {
+          mutablePost['user_name'] = 'Professional';
+          mutablePost['user_avatar'] = null;
+        }
+
+        // Normalize text content fields
+        if (mutablePost['content'] == null || mutablePost['content'].toString().isEmpty) {
+          mutablePost['content'] = mutablePost['title'] ?? mutablePost['description'] ?? '';
+        }
+
+        // Normalize media URL and type fields
+        final String? imageUrl = mutablePost['image_url']?.toString();
+        final String? videoUrl = mutablePost['video_url']?.toString();
+        final String? mediaUrl = mutablePost['media_url']?.toString();
+
+        if ((mediaUrl == null || mediaUrl.isEmpty)) {
+          if (videoUrl != null && videoUrl.isNotEmpty) {
+            mutablePost['media_url'] = videoUrl;
+            mutablePost['media_type'] = 'video';
+          } else if (imageUrl != null && imageUrl.isNotEmpty) {
+            mutablePost['media_url'] = imageUrl;
+            mutablePost['media_type'] = 'image';
+          }
+        }
+
+        final String likedByString = mutablePost['liked_by']?.toString() ?? '';
         final userList = likedByString
             .split(',')
             .map((e) => e.trim())
@@ -253,8 +337,12 @@ class _DashboardViewScreenState extends State<DashboardViewScreen> {
 
         mutablePost['is_liked'] = currentUserId != null && userList.contains(currentUserId);
         mutablePost['liked_by'] = likedByString;
+
         return mutablePost;
       }).toList();
+
+      // Save to local cache
+      await _cacheData(_cachedPostsKey, processedPosts);
 
       if (mounted) {
         setState(() {
@@ -271,8 +359,10 @@ class _DashboardViewScreenState extends State<DashboardViewScreen> {
       final data = await Supabase.instance.client
           .from('pcb')
           .select()
-          .order('created_at', ascending: false)
-          .limit(10);
+          .order('created_at', ascending: false);
+
+      // Save to local cache
+      await _cacheData(_cachedProfilesKey, data);
 
       if (mounted) {
         setState(() {
@@ -573,6 +663,7 @@ class _DashboardViewScreenState extends State<DashboardViewScreen> {
   @override
   Widget build(BuildContext context) {
     final bool isKeyboardVisible = MediaQuery.of(context).viewInsets.bottom > 0;
+    final String currentUserId = _supabase.auth.currentUser?.id ?? '';
 
     return Scaffold(
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
@@ -641,6 +732,10 @@ class _DashboardViewScreenState extends State<DashboardViewScreen> {
                           },
                           icon: const Text("😊", style: TextStyle(fontSize: 24)),
                         ),
+                        // --- NOTIFICATIONS ICON BUTTON WITH BADGE ---
+                        NotificationBellButton
+                          (currentUserId: currentUserId),
+
                         ThreeDotMenuWidget(
                           onRefresh: () => _fetchprofile(),
                           onMyprofile: () => _navigateToMyprofile(),

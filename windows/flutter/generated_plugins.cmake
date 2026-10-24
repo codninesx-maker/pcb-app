@@ -10,7 +10,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   permission_handler_windows
   share_plus
   url_launcher_windows
-  zego_express_engine
+  zego_express_engine_for_uikit
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST

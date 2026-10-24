@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:pharmacist_profile/image/cloudinary_service.dart';
+import 'package:pharmacist_profile/cloud/cloudinary_service.dart';
+
 import 'package:video_compress/video_compress.dart';
 
 class VideoUploadService {

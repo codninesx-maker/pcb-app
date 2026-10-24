@@ -19,7 +19,7 @@ class CloudinaryService {
     ),
   );
 
-  // 🛑 BANDWIDTH PROTECTION RESTRICTIONS
+  // 🛑 BANDWIDTH PROTECTION RESTRICTIONS (Fixed multiplication syntax)
   static const int maxImageSizeBytes = 5 * 1024 * 1024; // 5 MB Max for Images
   static const int maxVideoSizeBytes = 20 * 1024 * 1024; // 20 MB Max for Videos (~60s Reels)
 
@@ -35,7 +35,7 @@ class CloudinaryService {
         CloudinaryFile.fromFile(
           imageFile.path,
           resourceType: CloudinaryResourceType.Image,
-          folder: 'image',
+          folder: 'cloud',
         ),
       );
       debugPrint("DEBUG: Image Upload Success! URL: ${response.secureUrl}");
@@ -48,10 +48,9 @@ class CloudinaryService {
 
   Future<String?> uploadVideo(File videoFile) async {
     try {
-      // 1. Enforce Video Size Limit
       final fileSize = await videoFile.length();
       if (fileSize > maxVideoSizeBytes) {
-        debugPrint("DEBUG ERROR: Video size (${(fileSize / (1024 * 1024)).toStringAsFixed(1)}MB) exceeds the 20MB limit.");
+        debugPrint("DEBUG ERROR: Video size exceeds the 20MB limit.");
         return null;
       }
 
@@ -59,48 +58,37 @@ class CloudinaryService {
       const String uploadPreset = 'video_preset';
       final String url = "https://api.cloudinary.com/v1_1/$cloudName/video/upload";
 
-      // 2. Prepare Fast Multipart Form Data
       dio_pkg.FormData formData = dio_pkg.FormData.fromMap({
         'file': await dio_pkg.MultipartFile.fromFile(videoFile.path),
         'upload_preset': uploadPreset,
         'folder': 'video',
       });
 
-      debugPrint("DEBUG: Starting fast video upload via Dio client (${(fileSize / (1024 * 1024)).toStringAsFixed(2)} MB)...");
-
-      // 3. Post with live progress logging so you can monitor speed in the console
       dio_pkg.Response response = await _dioVideoClient.post(
         url,
         data: formData,
         onSendProgress: (int sent, int total) {
           if (total != -1) {
             final progress = (sent / total * 100).toStringAsFixed(0);
-            debugPrint("Fast Video Upload Progress: $progress% ($sent / $total bytes)");
+            debugPrint("Fast Video Upload Progress: $progress%");
           }
         },
       );
 
-      // 4. Parse Response
       if (response.statusCode == 200 && response.data != null) {
         final data = response.data;
         if (data is Map && data.containsKey('secure_url')) {
           final secureUrl = data['secure_url']?.toString();
           if (secureUrl != null && secureUrl.isNotEmpty) {
-            debugPrint("DEBUG: Video Upload Success! URL: $secureUrl");
             return secureUrl;
           }
         }
-        debugPrint("DEBUG ERROR: Cloudinary response missing 'secure_url': $data");
         return null;
       } else {
-        debugPrint("DEBUG ERROR: Cloudinary returned status code ${response.statusCode}");
         return null;
       }
     } on dio_pkg.DioException catch (e) {
       debugPrint("DEBUG: DIO EXCEPTION in uploadVideo: ${e.message}");
-      if (e.response != null) {
-        debugPrint("Cloudinary Error Response Body: ${e.response?.data}");
-      }
       return null;
     } catch (e) {
       debugPrint("DEBUG: UNEXPECTED EXCEPTION in uploadVideo: $e");
@@ -121,24 +109,22 @@ class CloudinaryService {
         return;
       }
 
-      // Determine resource type
+      // Determine correct resource type ('image' or 'video')
       String resourceType = 'image';
       if (pathSegments.contains('video') || oldUrl.contains('/video/')) {
         resourceType = 'video';
       }
 
-      // Start right after 'upload'
       int startIndex = uploadIndex + 1;
 
-      // Check if the next segment is a version tag (e.g., v1700000000)
+      // Check version segment
       if (startIndex < pathSegments.length) {
         final segment = pathSegments[startIndex];
         if (segment.startsWith('v') && int.tryParse(segment.substring(1)) != null) {
-          startIndex++; // Skip the version segment
+          startIndex++;
         }
       }
 
-      // Everything remaining from startIndex is the public ID (including folder + filename)
       if (startIndex >= pathSegments.length) {
         debugPrint("DEBUG ERROR: Could not extract public ID from URL");
         return;
@@ -146,7 +132,6 @@ class CloudinaryService {
 
       String publicId = pathSegments.sublist(startIndex).join('/');
 
-      // Remove the file extension (e.g., .mp4, .jpg)
       if (publicId.contains('.')) {
         publicId = publicId.substring(0, publicId.lastIndexOf('.'));
       }
@@ -158,7 +143,7 @@ class CloudinaryService {
 
       debugPrint("DEBUG: Attempting to invoke Edge Function for: $publicId ($resourceType)");
 
-      // Invoke Supabase Edge Function
+      // Invoke the deployed 'delete-image' Supabase Edge Function
       final response = await Supabase.instance.client.functions.invoke(
         'delete-image',
         body: {

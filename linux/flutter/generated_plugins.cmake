@@ -7,7 +7,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   file_selector_linux
   gtk
   url_launcher_linux
-  zego_express_engine
+  zego_express_engine_for_uikit
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST

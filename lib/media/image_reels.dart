@@ -1,13 +1,13 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:pharmacist_profile/image/cloudinary_service.dart';
+import 'package:pharmacist_profile/cloud/cloudinary_service.dart';
 
 class ImagePickerHelper {
   final ImagePicker _picker = ImagePicker();
   final CloudinaryService _cloudinaryService = CloudinaryService();
 
-  // Pick an image from Gallery or Camera
+  // Pick an cloud from Gallery or Camera
   Future<File?> pickImage(ImageSource source) async {
     try {
       final XFile? pickedFile = await _picker.pickImage(
@@ -19,7 +19,7 @@ class ImagePickerHelper {
         return File(pickedFile.path);
       }
     } catch (e) {
-      debugPrint("Error picking image: $e");
+      debugPrint("Error picking cloud: $e");
     }
     return null;
   }

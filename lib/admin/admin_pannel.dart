@@ -2,6 +2,7 @@ import 'package:pharmacist_profile/admin/admin_control_user.dart';
 import 'package:pharmacist_profile/admin/announcement_marque.dart';
 import 'package:pharmacist_profile/admin/featured_specialist_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:pharmacist_profile/analytics/visitors_details_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class AdminPannelScreen extends StatefulWidget {
@@ -137,6 +138,30 @@ class _AdminPannelScreenState extends State<AdminPannelScreen> {
                   Navigator.push(
                     context,
                     MaterialPageRoute(builder: (context) => const AdminControlUserScreen()),
+                  );
+                },
+              ),
+              // Option 4: Visitors Details Card
+              _buildMenuCard(
+                context,
+                title: "Visitor Analytics",
+                subtitle: "Track daily visits, session duration, and user preferences",
+                icon: Icons.analytics_outlined,
+                iconColor: Colors.purpleAccent,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => VisitorsDetailsScreen(
+                        visitorData: const {
+                          'visitor_name': 'Registered Visitor',
+                          'daily_visits': 0,
+                          'daily_duration_minutes': 0,
+                          'preferences': [],
+                          'recent_activity': [],
+                        },
+                      ),
+                    ),
                   );
                 },
               ),

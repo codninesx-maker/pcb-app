@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:pharmacist_profile/admin/admin_pannel.dart';
 import 'package:pharmacist_profile/admin/user_login.dart';
+import 'package:pharmacist_profile/threedot/HelpSupport.dart';
+import 'package:pharmacist_profile/threedot/about.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 
@@ -34,6 +36,16 @@ class ThreeDotMenuWidget extends StatelessWidget {
           );
         } else if (value == 'logout') {
           onLogout();
+        } else if (value == 'help_support') {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => const HelpSupportScreen()),
+          );
+        } else if (value == 'about') {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => const AboutScreen()),
+          );
         } else if (value == 'admin_panel') {
           Navigator.push(
             context,
@@ -90,6 +102,26 @@ class ThreeDotMenuWidget extends StatelessWidget {
                 ],
               ),
             ),
+          PopupMenuItem<String>(
+            value: 'help_support',
+            child: Row(
+              children: const [
+                Icon(Icons.help_outline, size: 20, color: Colors.blueAccent),
+                SizedBox(width: 10),
+                Text('Help & Support'),
+              ],
+            ),
+          ),
+          const PopupMenuItem<String>(
+            value: 'about',
+            child: Row(
+              children: [
+                Icon(Icons.info_outline, size: 20, color: Colors.blueAccent),
+                SizedBox(width: 10),
+                Text('About PCB'),
+              ],
+            ),
+          ),
           if (isUserAdmin)
             const PopupMenuItem<String>(
               value: 'admin_panel',

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:pharmacist_profile/dashboard/post/audiopop.dart';
+import 'package:pharmacist_profile/media/audiopop.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:audioplayers/audioplayers.dart';
 
@@ -205,7 +205,7 @@ class _FacebookReactionButtonState extends State<FacebookReactionButton> {
       widget.onReactionChanged!(calculatedCount, true);
     }
 
-    await _syncDatabase(finalString, calculatedCount);
+    await _syncDatabase(finalString, calculatedCount, isLikedAction: true);
   }
 
   Future<void> _handleTapAction() async {
@@ -241,24 +241,56 @@ class _FacebookReactionButtonState extends State<FacebookReactionButton> {
       widget.onReactionChanged!(calculatedCount, willBeLiked);
     }
 
-    await _syncDatabase(finalString, calculatedCount);
+    await _syncDatabase(finalString, calculatedCount, isLikedAction: willBeLiked);
   }
 
-  Future<void> _syncDatabase(String finalLikedByString,
-      int calculatedCount) async {
+  Future<void> _syncDatabase(String finalLikedByString, int calculatedCount, {required bool isLikedAction}) async {
     try {
       final updatedData = Map<String, dynamic>.from(widget.post);
       updatedData['likes_count'] = calculatedCount;
-      updatedData['liked_by'] =
-      finalLikedByString.isEmpty ? null : finalLikedByString;
+      updatedData['liked_by'] = finalLikedByString.isEmpty ? null : finalLikedByString;
 
-      await Supabase.instance.client
+      final supabase = Supabase.instance.client;
+      final authUser = supabase.auth.currentUser;
+
+      await supabase
           .from('pcb_posts')
           .update({
         'likes_count': calculatedCount,
         'liked_by': finalLikedByString.isEmpty ? null : finalLikedByString,
       })
           .eq('id', widget.post['id']);
+
+      // 🔔 TRIGGER LIKE NOTIFICATION TO POST OWNER
+      final postOwnerId = widget.post['user_id'];
+      debugPrint("🔍 DEBUG LIKE: isLikedAction=$isLikedAction, authUser=${authUser?.id}, postOwnerId=$postOwnerId");
+
+      if (isLikedAction && authUser != null && postOwnerId != null && postOwnerId != authUser.id) {
+        try {
+          // Fetch the actor's profile details
+          final actorProfile = await supabase
+              .from('pcb')
+              .select('name, image_url')
+              .eq('user_id', authUser.id)
+              .maybeSingle();
+
+          debugPrint("📤 Inserting like notification for post owner: $postOwnerId by actor: ${authUser.id}");
+
+          await supabase.from('pcb_notifications').insert({
+            'user_id': postOwnerId,
+            'actor_id': authUser.id,
+            'actor_avatar': actorProfile?['image_url'],
+            'title': actorProfile?['name'] ?? 'Someone',
+            'body': 'liked your post.',
+            'type': 'like',
+            'is_read': false,
+          });
+
+          debugPrint("✅ Like notification successfully inserted into database!");
+        } catch (notifErr) {
+          debugPrint("❌ Error sending like notification: $notifErr");
+        }
+      }
 
       if (widget.onChanged != null) {
         widget.onChanged!(updatedData);

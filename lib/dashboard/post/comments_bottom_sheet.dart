@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import 'audiopop.dart';
+import '../../media/audiopop.dart';
 
 class CommentsBottomSheet extends StatefulWidget {
   final dynamic postId;
@@ -216,6 +216,29 @@ class _CommentsBottomSheetState extends State<CommentsBottomSheet> {
           'liked_by': [],
           'created_at': DateTime.now().toIso8601String(),
         });
+        // 🔔 TRIGGER COMMENT NOTIFICATION TO POST OWNER
+        if (widget.postOwnerId != null && widget.postOwnerId != user.id) {
+          try {
+            final actorProfile = await _supabase
+                .from('pcb')
+                .select('name, image_url')
+                .eq('user_id', user.id)
+                .maybeSingle();
+
+            await _supabase.from('pcb_notifications').insert({
+              'user_id': widget.postOwnerId, // Must be the Auth User UUID of the post owner
+              'actor_id': user.id,
+              'actor_avatar': actorProfile?['image_url'],
+              'title': actorProfile?['name'] ?? 'Someone',
+              'body': 'commented on your post.',
+              'type': 'comment',
+              'is_read': false,
+            });
+            debugPrint("✅ Comment notification successfully inserted!");
+          } catch (notifErr) {
+            debugPrint("❌ Error sending comment notification: $notifErr");
+          }
+        }
 
         try {
           final postRes = await _supabase

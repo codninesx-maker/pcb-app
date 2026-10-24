@@ -1,17 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:pharmacist_profile/profile/view_profile_detail_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../profile/view_profile_detail_screen.dart';
+
 
 enum FollowListType { followers, following }
 
 class FollowersScreen extends StatefulWidget {
-  final String profileId; // Matches what you are passing in your onTap
-  final FollowListType listType; // Optional, defaults to followers
+  final String profileId;
+  final FollowListType listType;
 
   const FollowersScreen({
     super.key,
     required this.profileId,
-    this.listType = FollowListType.followers, // Defaults so you don't break existing calls
+    this.listType = FollowListType.followers,
   });
 
   @override
@@ -23,9 +24,14 @@ class _FollowersScreenState extends State<FollowersScreen> {
   bool _isLoading = true;
   List<Map<String, dynamic>> _usersList = [];
 
+  // Track follow status for each user ID in the list
+  final Map<String, bool> _isFollowingMap = {};
+  String? _currentUserId;
+
   @override
   void initState() {
     super.initState();
+    _currentUserId = _supabase.auth.currentUser?.id;
     _fetchData();
   }
 
@@ -75,6 +81,23 @@ class _FollowersScreenState extends State<FollowersScreen> {
         }
       }
 
+      // Check current user's following status for each user in the list
+      if (_currentUserId != null) {
+        for (var user in fetchedUsers) {
+          final targetUserId = user['user_id'];
+          if (targetUserId != null) {
+            final checkRes = await _supabase
+                .from('pcb_followers')
+                .select('id')
+                .eq('follower_id', _currentUserId!)
+                .eq('following_id', targetUserId)
+                .maybeSingle();
+
+            _isFollowingMap[targetUserId] = checkRes != null;
+          }
+        }
+      }
+
       if (mounted) {
         setState(() {
           _usersList = fetchedUsers;
@@ -86,6 +109,61 @@ class _FollowersScreenState extends State<FollowersScreen> {
       if (mounted) {
         setState(() => _isLoading = false);
       }
+    }
+  }
+
+  Future<void> _toggleFollow(String targetUserId, String targetName) async {
+    if (_currentUserId == null || _currentUserId == targetUserId) return;
+
+    final currentlyFollowing = _isFollowingMap[targetUserId] ?? false;
+
+    // Optimistic UI update
+    setState(() {
+      _isFollowingMap[targetUserId] = !currentlyFollowing;
+    });
+
+    try {
+      if (currentlyFollowing) {
+        // Unfollow
+        await _supabase
+            .from('pcb_followers')
+            .delete()
+            .eq('follower_id', _currentUserId!)
+            .eq('following_id', targetUserId);
+      } else {
+        // Follow & Insert Notification
+        await _supabase.from('pcb_followers').insert({
+          'follower_id': _currentUserId,
+          'following_id': targetUserId,
+        });
+
+        // Get current user's profile info for the notification actor details
+        final currentUserProfile = await _supabase
+            .from('pcb')
+            .select('name, image_url')
+            .eq('user_id', _currentUserId!)
+            .maybeSingle();
+
+        final actorName = currentUserProfile?['name'] ?? 'Someone';
+        final actorAvatar = currentUserProfile?['image_url'];
+
+        // Send Notification
+        await _supabase.from('pcb_notifications').insert({
+          'user_id': targetUserId, // Recipient
+          'actor_id': _currentUserId,
+          'actor_avatar': actorAvatar,
+          'title': actorName,
+          'body': 'started following you.',
+          'type': 'follow',
+          'is_read': false,
+        });
+      }
+    } catch (e) {
+      debugPrint("Error toggling follow: $e");
+      // Revert optimistic update on failure
+      setState(() {
+        _isFollowingMap[targetUserId] = currentlyFollowing;
+      });
     }
   }
 
@@ -131,9 +209,12 @@ class _FollowersScreenState extends State<FollowersScreen> {
         itemCount: _usersList.length,
         itemBuilder: (context, index) {
           final userData = _usersList[index];
+          final targetUserId = userData['user_id'];
           final name = userData['name'] ?? 'User';
           final imageUrl = userData['image_url'];
           final specialty = userData['specialization'] ?? userData['designation'] ?? '';
+          final isFollowing = _isFollowingMap[targetUserId] ?? false;
+          final isSelf = _currentUserId == targetUserId;
 
           return Container(
             margin: const EdgeInsets.only(bottom: 8),
@@ -167,7 +248,24 @@ class _FollowersScreenState extends State<FollowersScreen> {
                 style: const TextStyle(fontSize: 13, color: Colors.grey),
               )
                   : null,
-              trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+              trailing: isSelf
+                  ? null
+                  : ElevatedButton(
+                onPressed: () => _toggleFollow(targetUserId, name),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: isFollowing ? Colors.grey.shade200 : Colors.blueAccent,
+                  foregroundColor: isFollowing ? Colors.black87 : Colors.white,
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                ),
+                child: Text(
+                  isFollowing ? 'Following' : 'Follow',
+                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                ),
+              ),
               onTap: () {
                 Navigator.push(
                   context,

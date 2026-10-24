@@ -1,18 +1,22 @@
+import 'dart:convert';
 import 'dart:io';
+import 'package:pharmacist_profile/dashboard/post/comments_bottom_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_linkify/flutter_linkify.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:pharmacist_profile/admobs/ads_test_banner.dart';
-import 'package:pharmacist_profile/dashboard/post/Liveplaceholder.dart';
-import 'package:pharmacist_profile/dashboard/post/comments_bottom_sheet.dart';
+import 'package:pharmacist_profile/dashboard/post/like_coments_share.dart';
+import 'package:pharmacist_profile/media/Liveplaceholder.dart';
 import 'package:pharmacist_profile/dashboard/post/edit_post.dart';
-import 'package:pharmacist_profile/dashboard/post/live.dart';
-import 'package:pharmacist_profile/dashboard/post/video/feed_video_player.dart';
+import 'package:pharmacist_profile/threedot/ReportPost.dart';
+import 'package:pharmacist_profile/video/feed_video_player.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 
 class CommunityNewsFeedSection extends StatefulWidget {
   final Future<List<Map<String, dynamic>>> postsFuture;
@@ -37,8 +41,54 @@ class CommunityNewsFeedSection extends StatefulWidget {
 }
 
 class _CommunityNewsFeedSectionState extends State<CommunityNewsFeedSection> {
+  static const String _cachedPostsKey = 'cached_community_posts';
+  late Future<List<Map<String, dynamic>>> _combinedFuture;
+
   final AudioPlayer _audioPlayer = AudioPlayer();
   OverlayEntry? _overlayEntry;
+
+  // Track expanded state for each post ID
+  final Map<dynamic, bool> _expandedPosts = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _combinedFuture = _fetchWithOfflineFallback();
+  }
+
+  @override
+  void didUpdateWidget(covariant CommunityNewsFeedSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.postsFuture != widget.postsFuture) {
+      setState(() {
+        _combinedFuture = _fetchWithOfflineFallback();
+      });
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchWithOfflineFallback() async {
+    final prefs = await SharedPreferences.getInstance();
+    try {
+      final posts = await widget.postsFuture;
+      if (posts.isNotEmpty) {
+        await prefs.setString(_cachedPostsKey, jsonEncode(posts));
+      }
+      return posts;
+    } catch (e) {
+      final cachedString = prefs.getString(_cachedPostsKey);
+      if (cachedString != null) {
+        final List<dynamic> decoded = jsonDecode(cachedString);
+        return decoded.map((item) {
+          final mapItem = Map<String, dynamic>.from(item);
+          if (mapItem['pcb'] != null) {
+            mapItem['pcb'] = Map<String, dynamic>.from(mapItem['pcb']);
+          }
+          return mapItem;
+        }).toList();
+      }
+      rethrow;
+    }
+  }
 
   @override
   void dispose() {
@@ -70,93 +120,10 @@ class _CommunityNewsFeedSectionState extends State<CommunityNewsFeedSection> {
     }
   }
 
-  (String, String, Color, IconData) _getReactionDisplay(String? reactionType) {
-    switch (reactionType) {
-      case 'love':
-        return ('Love', '❤️', Colors.red, Icons.favorite);
-      case 'haha':
-        return ('Haha', '😂', Colors.amber, Icons.sentiment_very_satisfied);
-      case 'wow':
-        return ('Wow', '😮', Colors.amber, Icons.sentiment_satisfied);
-      case 'sad':
-        return ('Sad', '😢', Colors.amber, Icons.sentiment_dissatisfied);
-      case 'angry':
-        return ('Angry', '😡', Colors.deepOrange, Icons.local_fire_department);
-      case 'like':
-      default:
-        return ('Like', '👍', Colors.blueAccent, Icons.thumb_up);
-    }
-  }
-
   Future<void> _playSound() async {
     try {
       await _audioPlayer.play(AssetSource('sounds/pop.mp3'));
     } catch (_) {}
-  }
-
-  void _showReactionOverlay(BuildContext context, Map<String, dynamic> post, StateSetter setLocalState, GlobalKey buttonKey) {
-    if (_overlayEntry != null) return;
-
-    final RenderBox? renderBox = buttonKey.currentContext?.findRenderObject() as RenderBox?;
-    if (renderBox == null) return;
-
-    final position = renderBox.localToGlobal(Offset.zero);
-
-    _overlayEntry = OverlayEntry(
-      builder: (context) => Stack(
-        children: [
-          Positioned.fill(
-            child: GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onTap: _removeOverlay,
-              child: Container(color: Colors.transparent),
-            ),
-          ),
-          Positioned(
-            left: position.dx - 20,
-            top: position.dy - 65,
-            child: TweenAnimationBuilder<double>(
-              tween: Tween(begin: 0.0, end: 1.0),
-              duration: const Duration(milliseconds: 200),
-              builder: (context, value, child) {
-                return Transform.scale(
-                  scale: value,
-                  alignment: Alignment.bottomCenter,
-                  child: Opacity(opacity: value, child: child),
-                );
-              },
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(30),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.2),
-                      blurRadius: 10,
-                      spreadRadius: 2,
-                    ),
-                  ],
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _buildReactionIcon('👍', 'like', Colors.blue, 'Like', post, setLocalState),
-                    _buildReactionIcon('❤️', 'love', Colors.red, 'Love', post, setLocalState),
-                    _buildReactionIcon('😂', 'haha', Colors.amber, 'Haha', post, setLocalState),
-                    _buildReactionIcon('😮', 'wow', Colors.amber, 'Wow', post, setLocalState),
-                    _buildReactionIcon('😢', 'sad', Colors.amber, 'Sad', post, setLocalState),
-                    _buildReactionIcon('😡', 'angry', Colors.deepOrange, 'Angry', post, setLocalState),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-
-    Overlay.of(context).insert(_overlayEntry!);
   }
 
   void _removeOverlay() {
@@ -164,47 +131,28 @@ class _CommunityNewsFeedSectionState extends State<CommunityNewsFeedSection> {
     _overlayEntry = null;
   }
 
-  Widget _buildReactionIcon(String emoji, String reactionType, Color color, String label, Map<String, dynamic> post, StateSetter setLocalState) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 6),
-      child: GestureDetector(
-        onTap: () async {
-          _playSound();
-          _removeOverlay();
-
-          final authUser = Supabase.instance.client.auth.currentUser;
-          if (authUser == null) return;
-
-          final String currentLikedBy = post['liked_by']?.toString() ?? '';
-          List<String> userList = currentLikedBy
-              .split(',')
-              .map((e) => e.trim())
-              .where((e) => e.isNotEmpty && !e.startsWith('${authUser.id}:') && e != authUser.id)
-              .toList();
-
-          userList.add('${authUser.id}:$reactionType');
-          int calculatedCount = userList.length;
-          String finalString = userList.join(',');
-
-          setLocalState(() {
-            post['is_liked'] = true;
-            post['likes_count'] = calculatedCount;
-            post['liked_by'] = finalString;
-          });
-
-          try {
-            await Supabase.instance.client
-                .from('pcb_posts')
-                .update({
-              'likes_count': calculatedCount,
-              'liked_by': finalString,
-            })
-                .eq('id', post['id']);
-          } catch (e) {
-            debugPrint("Error updating reaction: $e");
-          }
-        },
-        child: Text(emoji, style: const TextStyle(fontSize: 28)),
+  void _showFullImage(BuildContext context, String imageUrl) {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        backgroundColor: Colors.black,
+        insetPadding: EdgeInsets.zero,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            InteractiveViewer(
+              child: Image.network(imageUrl, fit: BoxFit.contain),
+            ),
+            Positioned(
+              top: 40,
+              right: 20,
+              child: IconButton(
+                icon: const Icon(Icons.close, color: Colors.white, size: 30),
+                onPressed: () => Navigator.pop(context),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -225,7 +173,6 @@ class _CommunityNewsFeedSectionState extends State<CommunityNewsFeedSection> {
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Live Icon-Only Button
                 IconButton(
                   onPressed: () {
                     Navigator.push(
@@ -239,7 +186,6 @@ class _CommunityNewsFeedSectionState extends State<CommunityNewsFeedSection> {
                   tooltip: 'Live',
                 ),
                 const SizedBox(width: 4),
-                // Create Post Button
                 TextButton.icon(
                   onPressed: widget.onCreatePostPressed,
                   icon: const Icon(Icons.add_circle_outline, size: 18),
@@ -251,7 +197,7 @@ class _CommunityNewsFeedSectionState extends State<CommunityNewsFeedSection> {
         ),
         const SizedBox(height: 10),
         FutureBuilder<List<Map<String, dynamic>>>(
-          future: widget.postsFuture,
+          future: _combinedFuture,
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) {
               return const Center(
@@ -305,6 +251,7 @@ class _CommunityNewsFeedSectionState extends State<CommunityNewsFeedSection> {
                 }
 
                 final post = posts[postIndex];
+                final postId = post['id'];
 
                 final profile = post['pcb'] ?? {};
                 final userName = profile['name'] ?? 'Anonymous Professional';
@@ -322,7 +269,7 @@ class _CommunityNewsFeedSectionState extends State<CommunityNewsFeedSection> {
                 final isMyPost = currentUserId != null &&
                     (postUserId == currentUserId || profile['user_id'] == currentUserId);
 
-                final GlobalKey uniqueButtonKey = GlobalKey();
+                final bool isExpanded = _expandedPosts[postId] ?? false;
 
                 void showManagePostBottomSheet() {
                   showModalBottomSheet(
@@ -351,10 +298,15 @@ class _CommunityNewsFeedSectionState extends State<CommunityNewsFeedSection> {
                               onTap: () {
                                 Navigator.pop(context);
                                 if (content.isNotEmpty) {
-                                  Clipboard.setData(ClipboardData(text: content));
+                                  final String postId = post['id'].toString();
+                                  // Using your Play Store link (or deep link if preferred)
+                                  final String postLink = "https://play.google.com/store/apps/details?id=com.rxai.pcb";
+                                  final String combinedText = "$content\n\nDownload PCB App: $postLink";
+
+                                  Clipboard.setData(ClipboardData(text: combinedText));
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     const SnackBar(
-                                      content: Text("Post text copied to clipboard!"),
+                                      content: Text("Post text and app link copied to clipboard!"),
                                     ),
                                   );
                                 }
@@ -390,9 +342,11 @@ class _CommunityNewsFeedSectionState extends State<CommunityNewsFeedSection> {
                                 leading: const Icon(Icons.report, color: Colors.orange),
                                 title: const Text("Report Post"),
                                 onTap: () {
-                                  Navigator.pop(context);
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text("Post reported.")),
+                                  Navigator.pop(context); // Close the bottom sheet
+                                  ReportHelper.reportPostToWhatsApp(
+                                    context,
+                                    post['id'].toString(),
+                                    content,
                                   );
                                 },
                               ),
@@ -405,7 +359,7 @@ class _CommunityNewsFeedSectionState extends State<CommunityNewsFeedSection> {
                 }
 
                 return Card(
-                  key: ValueKey(post['id']),
+                  key: ValueKey(postId),
                   margin: const EdgeInsets.only(bottom: 12),
                   elevation: 0,
                   color: Colors.white,
@@ -420,14 +374,20 @@ class _CommunityNewsFeedSectionState extends State<CommunityNewsFeedSection> {
                       children: [
                         Row(
                           children: [
+                            // --- AVATAR: Tapping opens full-screen image preview ---
                             GestureDetector(
-                              onTap: () => widget.onNavigateToAuthorprofile(postUserId),
+                              onTap: () {
+                                if (userImage != null && userImage.toString().isNotEmpty) {
+                                  _showFullImage(context, userImage.toString());
+                                }
+                              },
                               child: CircleAvatar(
                                 radius: 20,
                                 backgroundColor: Colors.blueAccent.withOpacity(0.1),
-                                backgroundImage:
-                                userImage != null ? NetworkImage(userImage) : null,
-                                child: userImage == null
+                                backgroundImage: (userImage != null && userImage.toString().isNotEmpty)
+                                    ? CachedNetworkImageProvider(userImage.toString()) as ImageProvider
+                                    : null,
+                                child: (userImage == null || userImage.toString().isEmpty)
                                     ? const Icon(Icons.person, size: 20, color: Colors.blueAccent)
                                     : null,
                               ),
@@ -437,6 +397,7 @@ class _CommunityNewsFeedSectionState extends State<CommunityNewsFeedSection> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
+                                  // --- NAME: Tapping still goes to author profile ---
                                   InkWell(
                                     onTap: () => widget.onNavigateToAuthorprofile(postUserId),
                                     child: Text(
@@ -460,37 +421,67 @@ class _CommunityNewsFeedSectionState extends State<CommunityNewsFeedSection> {
                           ],
                         ),
                         const SizedBox(height: 12),
-                        // --- FIXED LINKIFY WIDGET ---
                         if (content.isNotEmpty) ...[
-                          Linkify(
-                            onOpen: (link) async {
-                              String urlString = link.url;
-                              // Ensure URL has a valid scheme so it opens properly in external browsers
-                              if (!urlString.startsWith('http://') && !urlString.startsWith('https://')) {
-                                urlString = 'https://$urlString';
-                              }
-                              final Uri url = Uri.parse(urlString);
-                              try {
-                                if (await canLaunchUrl(url)) {
-                                  await launchUrl(url, mode: LaunchMode.externalApplication);
-                                } else {
-                                  debugPrint('Could not launch $urlString');
-                                }
-                              } catch (e) {
-                                debugPrint('Error launching link: $e');
-                              }
+                          LayoutBuilder(
+                            builder: (context, constraints) {
+                              // Estimate text length for truncation (~3 lines / ~150 chars)
+                              final bool isLongText = content.length > 150 || content.split('\n').length > 3;
+
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Linkify(
+                                    onOpen: (link) async {
+                                      String urlString = link.url;
+                                      if (!urlString.startsWith('http://') && !urlString.startsWith('https://')) {
+                                        urlString = 'https://$urlString';
+                                      }
+                                      final Uri url = Uri.parse(urlString);
+                                      try {
+                                        if (await canLaunchUrl(url)) {
+                                          await launchUrl(url, mode: LaunchMode.externalApplication);
+                                        } else {
+                                          debugPrint('Could not launch $urlString');
+                                        }
+                                      } catch (e) {
+                                        debugPrint('Error launching link: $e');
+                                      }
+                                    },
+                                    text: content,
+                                    maxLines: isExpanded ? null : 3,
+                                    overflow: isExpanded ? TextOverflow.visible : TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      color: Colors.black87,
+                                      height: 1.4,
+                                    ),
+                                    linkStyle: const TextStyle(
+                                      color: Colors.blueAccent,
+                                      fontWeight: FontWeight.w600,
+                                      decoration: TextDecoration.underline,
+                                    ),
+                                  ),
+                                  if (isLongText) ...[
+                                    const SizedBox(height: 4),
+                                    GestureDetector(
+                                      onTap: () {
+                                        setState(() {
+                                          _expandedPosts[postId] = !isExpanded;
+                                        });
+                                      },
+                                      child: Text(
+                                        isExpanded ? "See Less" : "See More...",
+                                        style: const TextStyle(
+                                          color: Colors.blueAccent,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              );
                             },
-                            text: content,
-                            style: const TextStyle(
-                              fontSize: 14,
-                              color: Colors.black87,
-                              height: 1.4,
-                            ),
-                            linkStyle: const TextStyle(
-                              color: Colors.blueAccent,
-                              fontWeight: FontWeight.w600,
-                              decoration: TextDecoration.underline,
-                            ),
                           ),
                         ],
 
@@ -500,23 +491,19 @@ class _CommunityNewsFeedSectionState extends State<CommunityNewsFeedSection> {
                             onTap: () => widget.onShowImagePreview(postImageUrl),
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(8),
-                              child: Image.network(
-                                postImageUrl,
+                              child: CachedNetworkImage(
+                                imageUrl: postImageUrl.toString(),
                                 height: 200,
                                 width: double.infinity,
                                 fit: BoxFit.cover,
-                                loadingBuilder: (context, child, loadingProgress) {
-                                  if (loadingProgress == null) return child;
-                                  return Container(
-                                    height: 200,
-                                    color: Colors.grey.shade100,
-                                    child: const Center(
-                                      child: CircularProgressIndicator(strokeWidth: 2),
-                                    ),
-                                  );
-                                },
-                                errorBuilder: (context, error, stackTrace) =>
-                                const SizedBox.shrink(),
+                                placeholder: (context, url) => Container(
+                                  height: 200,
+                                  color: Colors.grey.shade100,
+                                  child: const Center(
+                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                  ),
+                                ),
+                                errorWidget: (context, url, error) => const SizedBox.shrink(),
                               ),
                             ),
                           ),
@@ -536,202 +523,26 @@ class _CommunityNewsFeedSectionState extends State<CommunityNewsFeedSection> {
                         const SizedBox(height: 12),
                         const Divider(height: 1, thickness: 0.5),
                         const SizedBox(height: 4),
-                        StatefulBuilder(
-                          builder: (context, setLocalState) {
-                            final authUser = Supabase.instance.client.auth.currentUser;
 
-                            // Parse liked_by string properly
-                            final String likedByText = post['liked_by']?.toString() ?? '';
-                            List<String> userList = likedByText
-                                .split(',')
-                                .map((e) => e.trim())
-                                .where((e) => e.isNotEmpty)
-                                .toList();
-
-                            String? userEntry;
-                            if (authUser != null) {
-                              userEntry = userList.firstWhere(
-                                    (e) => e == authUser.id || e.startsWith('${authUser.id}:'),
-                                orElse: () => '',
-                              );
-                            }
-
-                            final bool isLiked = userEntry != null && userEntry.isNotEmpty;
-                            String? currentReaction;
-                            if (isLiked) {
-                              if (userEntry!.contains(':')) {
-                                currentReaction = userEntry.split(':')[1];
-                              } else {
-                                currentReaction = 'like'; // Explicitly default plain user IDs to 'like'
-                              }
-                            }
-
-                            final int likesCount = post['likes_count'] ?? 0;
-                            final int commentsCount = post['comments_count'] ?? 0;
-                            final int sharesCount = post['shares_count'] ?? 0;
-
-                            // --- Get dynamic emoji, color, and icon data ---
-                            final (labelName, emojiSymbol, color, iconData) = _getReactionDisplay(currentReaction);
-
-                            return Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceAround,
-                              children: [
-                                KeyedSubtree(
-                                  key: uniqueButtonKey,
-                                  child: GestureDetector(
-                                    behavior: HitTestBehavior.opaque,
-                                    onTap: () async {
-                                      if (authUser == null) return;
-                                      _playSound();
-                                      debugPrint("Play sound triggered for tap!");
-
-                                      final currentUserId = authUser.id;
-
-                                      // Filter out current user from the list
-                                      List<String> updatedUserList = likedByText
-                                          .split(',')
-                                          .map((e) => e.trim())
-                                          .where((e) => e.isNotEmpty && !e.startsWith('$currentUserId:') && e != currentUserId)
-                                          .toList();
-
-                                      // Facebook Behavior: If they already reacted with anything, tap removes it. If not, tap adds 'like'.
-                                      bool willBeLiked = !isLiked;
-                                      if (willBeLiked) {
-                                        updatedUserList.add('$currentUserId:like');
-                                      }
-
-                                      int calculatedCount = updatedUserList.length;
-                                      String? finalLikedByString = updatedUserList.isEmpty ? null : updatedUserList.join(',');
-
-                                      setLocalState(() {
-                                        post['likes_count'] = calculatedCount < 0 ? 0 : calculatedCount;
-                                        post['liked_by'] = finalLikedByString;
-                                      });
-
-                                      try {
-                                        await Supabase.instance.client
-                                            .from('pcb_posts')
-                                            .update({
-                                          'likes_count': post['likes_count'],
-                                          'liked_by': finalLikedByString,
-                                        })
-                                            .eq('id', post['id']);
-                                      } catch (e) {
-                                        debugPrint("Error updating likes: $e");
-                                      }
-                                    },
-                                    onLongPress: () {
-                                      _playSound();
-                                      _showReactionOverlay(context, post, setLocalState, uniqueButtonKey);
-                                    },
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(
-                                            isLiked ? iconData : Icons.thumb_up_outlined,
-                                            size: 16,
-                                            color: isLiked ? color : Colors.grey,
-                                          ),
-                                          const SizedBox(width: 6),
-                                          Text(
-                                            isLiked
-                                                ? labelName
-                                                : (likesCount > 0 ? "$likesCount" : "Like"),
-                                            style: TextStyle(
-                                              color: isLiked ? color : Colors.grey,
-                                              fontSize: 13,
-                                              fontWeight: FontWeight.w600,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-
-                                TextButton.icon(
-                                  onPressed: () {
-                                    showModalBottomSheet(
-                                      context: context,
-                                      isScrollControlled: true,
-                                      backgroundColor: Colors.white,
-                                      shape: const RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-                                      ),
-                                      builder: (context) => Padding(
-                                        padding: EdgeInsets.only(
-                                          bottom: MediaQuery.of(context).viewInsets.bottom,
-                                        ),
-                                        child: DraggableScrollableSheet(
-                                          initialChildSize: 0.6,
-                                          minChildSize: 0.3,
-                                          maxChildSize: 0.9,
-                                          expand: false,
-                                          builder: (context, scrollController) => CommentsBottomSheet(
-                                            postId: post['id'],
-                                            scrollController: scrollController,
-                                            postOwnerId: post['user_id'],
-                                          ),
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                  icon: const Icon(Icons.chat_bubble_outline, size: 16, color: Colors.grey),
-                                  label: Text(
-                                    commentsCount > 0 ? "$commentsCount" : "Comment",
-                                    style: const TextStyle(
-                                      color: Colors.grey,
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-
-                                TextButton.icon(
-                                  onPressed: () async {
-                                    final String postLink = "https://codninesx-maker.github.io/pcb-app/#/post/${post['id']}";
-                                    final String postSnippet = post['content'] ?? 'Check out this post on PCB';
-                                    final String shareContent = "Check this out on PCB App: \"$postSnippet\"\n\nClick to view instantly:\n$postLink";
-
-                                    try {
-                                      final newShares = sharesCount + 1;
-                                      setLocalState(() {
-                                        post['shares_count'] = newShares;
-                                      });
-
-                                      await Supabase.instance.client
-                                          .from('pcb_posts')
-                                          .update({'shares_count': newShares})
-                                          .eq('id', post['id']);
-                                    } catch (e) {
-                                      debugPrint("Error updating shares: $e");
-                                    }
-
-                                    try {
-                                      await Share.share(shareContent);
-                                    } catch (e) {
-                                      debugPrint("Error launching external share: $e");
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(content: Text("Could not open share sheet")),
-                                      );
-                                    }
-                                  },
-                                  icon: const Icon(Icons.share_outlined, size: 16, color: Colors.grey),
-                                  label: Text(
-                                    sharesCount > 0 ? "$sharesCount" : "Share",
-                                    style: const TextStyle(
-                                      color: Colors.grey,
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            );
+                        // --- Unified Action Component ---
+                        Likecommentshare(
+                          post: post,
+                          onReactionChanged: (newLikesCount, isLiked) {
+                            setState(() {
+                              post['likes_count'] = newLikesCount;
+                            });
                           },
-                        )
+                          onShareChanged: (newSharesCount) {
+                            setState(() {
+                              post['shares_count'] = newSharesCount;
+                            });
+                          },
+                          onCommentChanged: (newCommentsCount) {
+                            setState(() {
+                              post['comments_count'] = newCommentsCount;
+                            });
+                          },
+                        ),
                       ],
                     ),
                   ),

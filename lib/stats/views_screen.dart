@@ -27,13 +27,13 @@ class _ViewsScreenState extends State<ViewsScreen> {
       setState(() => _isLoading = true);
 
       // 1. Fetch raw view records for this owner (sorted newest first)
-      debugPrint("DEBUG: Querying views for ownerId: ${widget.ownerId}");
+      // 1. Fetch raw view records for this owner (sorted newest first)
+      debugPrint("DEBUG: Querying views for profileId: ${widget.ownerId}");
       final viewsResponse = await _supabase
           .from('pcb_profile_views')
-          .select('id, viewer_id, created_at') // Make sure 'id' is selected here
-          .eq('owner_id', widget.ownerId)
+          .select('id, viewer_id, created_at')
+          .eq('owner_id', widget.ownerId) // ✅ Query using 'owner_id'
           .order('created_at', ascending: false);
-      debugPrint("DEBUG: Raw views returned: $viewsResponse");
 
       final List<dynamic> rawViews = viewsResponse;
       if (rawViews.isEmpty) {
@@ -94,10 +94,11 @@ class _ViewsScreenState extends State<ViewsScreen> {
       }
 
       // 3. Fetch user details from the 'pcb' table using .inFilter()
+      // 3. Fetch user details from the 'pcb' table using .inFilter() on 'id'
       final usersResponse = await _supabase
           .from('pcb')
           .select('id, user_id, name, image_url, specialization, grade')
-          .inFilter('user_id', viewerIds);
+          .inFilter('id', viewerIds); // ✅ Fixed: Querying by table row 'id'
 
       final List<dynamic> usersData = usersResponse;
 

@@ -3,11 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:pharmacist_profile/admobs/ads_test_banner.dart';
+import 'package:pharmacist_profile/dashboard/fblike_Image_adjuster_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:pharmacist_profile/image/cloudinary_service.dart';
+import 'package:pharmacist_profile/cloud/cloudinary_service.dart';
 import 'package:file_picker/file_picker.dart';
 
-import '../dashboard/post/image_reels.dart';
+import '../media/image_reels.dart';
 
 class EditprofileScreen extends StatefulWidget {
   final Map<String, dynamic>? userData;
@@ -33,6 +34,8 @@ class _EditprofileScreenState extends State<EditprofileScreen> {
   final _pcbLicenseController = TextEditingController();
   final ImagePickerHelper _imagePickerHelper = ImagePickerHelper();
 
+  final ImagePicker _imagePicker = ImagePicker();
+
   String _selectedStatus = "Available";
   final List<String> _statusOptions = ["Available", "Unavailable"];
 
@@ -51,7 +54,7 @@ class _EditprofileScreenState extends State<EditprofileScreen> {
   File? _videoFile;
 
   File? _imageFile;
-  File? _coverFile; // Added cover image file state
+  File? _coverFile; // Added cover cloud file state
   bool _isLoading = false;
   bool _isVerifyingPcb = false; // Added PCB verification state
 
@@ -106,8 +109,25 @@ class _EditprofileScreenState extends State<EditprofileScreen> {
         : null;
   }
 
+  // --- Facebook Style Adjuster Trigger ---
+  Future<void> _openFacebookStyleAndSave(File imageFile, bool isCover) async {
+    final File? adjustedFile = await Navigator.push<File>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => FacebookImageAdjusterScreen(
+          imageFile: imageFile,
+          isCover: isCover,
+        ),
+      ),
+    );
+
+    if (adjustedFile != null) {
+      await _validateAndSetFile(adjustedFile, isCover);
+    }
+  }
+
+  // --- Updated Media Picker with Adjuster Integration ---
   Future<void> _pickAndValidateMedia({bool isCover = false}) async {
-    // ⚠️ Security & Policy Warning Check
     final bool? shouldProceed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -132,7 +152,8 @@ class _EditprofileScreenState extends State<EditprofileScreen> {
 
     if (shouldProceed != true) return;
 
-    // Show bottom sheet to choose between Gallery or Camera
+    if (!mounted) return;
+
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
@@ -154,9 +175,12 @@ class _EditprofileScreenState extends State<EditprofileScreen> {
               title: const Text("Choose from Gallery"),
               onTap: () async {
                 Navigator.pop(sheetContext);
-                final file = await _imagePickerHelper.pickImage(ImageSource.gallery);
-                if (file != null) {
-                  _validateAndSetFile(file, isCover);
+                final XFile? pickedFile = await _imagePicker.pickImage(
+                  source: ImageSource.gallery,
+                  imageQuality: 90,
+                );
+                if (pickedFile != null) {
+                  await _openFacebookStyleAndSave(File(pickedFile.path), isCover);
                 }
               },
             ),
@@ -165,9 +189,12 @@ class _EditprofileScreenState extends State<EditprofileScreen> {
               title: const Text("Take a Picture"),
               onTap: () async {
                 Navigator.pop(sheetContext);
-                final file = await _imagePickerHelper.pickImage(ImageSource.camera);
-                if (file != null) {
-                  _validateAndSetFile(file, isCover);
+                final XFile? pickedFile = await _imagePicker.pickImage(
+                  source: ImageSource.camera,
+                  imageQuality: 90,
+                );
+                if (pickedFile != null) {
+                  await _openFacebookStyleAndSave(File(pickedFile.path), isCover);
                 }
               },
             ),
@@ -177,7 +204,8 @@ class _EditprofileScreenState extends State<EditprofileScreen> {
     );
   }
 
-// Helper to validate size and update state
+
+  // Fixed file size validation (5MB max)
   Future<void> _validateAndSetFile(File file, bool isCover) async {
     final fileSize = await file.length();
     if (fileSize > 5 * 1024 * 1024) {
@@ -286,27 +314,31 @@ class _EditprofileScreenState extends State<EditprofileScreen> {
       String? imageUrl = profile['image_url'];
       String? coverUrl = profile['cover_url'];
 
-      // 1. Handle New Profile Picture Upload & Old Deletion
+      // 1. If a new profile image is picked, upload it & delete the old one from Cloudinary
       if (_imageFile != null) {
         final newImageUrl = await _cloudinary.uploadImage(_imageFile!);
         if (newImageUrl != null) {
           if (imageUrl != null && imageUrl.isNotEmpty) {
             try {
               await _cloudinary.deleteMedia(imageUrl);
-            } catch (_) {}
+            } catch (e) {
+              debugPrint("Failed to delete old avatar from Cloudinary: $e");
+            }
           }
           imageUrl = newImageUrl;
         }
       }
 
-      // 2. Handle New Cover Photo Upload & Old Deletion
+      // 2. If a new cover image is picked, upload it & delete the old one from Cloudinary
       if (_coverFile != null) {
         final newCoverUrl = await _cloudinary.uploadImage(_coverFile!);
         if (newCoverUrl != null) {
           if (coverUrl != null && coverUrl.isNotEmpty) {
             try {
               await _cloudinary.deleteMedia(coverUrl);
-            } catch (_) {}
+            } catch (e) {
+              debugPrint("Failed to delete old cover from Cloudinary: $e");
+            }
           }
           coverUrl = newCoverUrl;
         }
@@ -343,17 +375,7 @@ class _EditprofileScreenState extends State<EditprofileScreen> {
         Navigator.pop(context, true);
       }
     } catch (e) {
-      debugPrint("--- POSTGREST ERROR START ---");
-      if (e is PostgrestException) {
-        debugPrint("Message: ${e.message}");
-        debugPrint("Code: ${e.code}");
-        debugPrint("Details: ${e.details}");
-        debugPrint("Hint: ${e.hint}");
-      } else {
-        debugPrint("General Error: $e");
-      }
-      debugPrint("--- POSTGREST ERROR END ---");
-
+      debugPrint("Error saving profile: $e");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text("Error: ${e.toString()}"), backgroundColor: Colors.red),
@@ -499,10 +521,9 @@ class _EditprofileScreenState extends State<EditprofileScreen> {
                     "Bio",
                     _aboutController,
                     maxLines: 4,
-                    maxLength: 130, // Limits characters so it stays concise and shows fully
-                    icon: Icons.info_outline,
+                    maxLength: 188, // Limits characters so it stays concise and shows fully
                     validator: (value) {
-                      if (value != null && value.length > 130) {
+                      if (value != null && value.length > 188) {
                         return "Bio cannot exceed 130 characters";
                       }
                       return null;
